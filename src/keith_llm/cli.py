@@ -38,6 +38,47 @@ def _cmd_binarize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_generate(args: argparse.Namespace) -> int:
+    import torch
+
+    from keith_llm.config import load_config
+    from keith_llm.generate import generate
+    from keith_llm.model import Transformer
+    from keith_llm.tokenizer.wrapper import KeithTokenizer
+
+    model_cfg, _ = load_config(args.config)
+    tok = KeithTokenizer.load(args.tokenizer)
+    if tok.vocab_size != model_cfg.vocab_size:
+        raise SystemExit(
+            f"tokenizer vocab ({tok.vocab_size}) != model vocab ({model_cfg.vocab_size}); "
+            "use the config the checkpoint was trained with"
+        )
+    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    model = Transformer(model_cfg).to(device)
+    ckpt = torch.load(args.ckpt, map_location=device, weights_only=True)
+    model.load_state_dict(ckpt.get("model_state", ckpt))
+
+    generator = None
+    if args.seed is not None:
+        generator = torch.Generator(device=device).manual_seed(args.seed)
+    prompt_ids = tok.control_prefix(args.system, args.doc_type)
+    if args.prompt:
+        prompt_ids += tok.encode(args.prompt)
+    out_ids = generate(
+        model,
+        prompt_ids,
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        top_k=args.top_k,
+        top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
+        stop_ids=[tok.eos_id],
+        generator=generator,
+    )
+    print(tok.decode(out_ids))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="keith-llm",
@@ -64,6 +105,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out-dir", default="data/tokens")
     p.add_argument("--val-mod", type=int, default=50, help="1-in-N documents go to val")
     p.set_defaults(func=_cmd_binarize)
+
+    p = sub.add_parser("generate", help="generate text from a trained checkpoint")
+    p.add_argument("--config", required=True)
+    p.add_argument("--ckpt", required=True)
+    p.add_argument("--tokenizer", default="data/tokenizer/tokenizer.json")
+    p.add_argument("--system", default="generic", help="rule system to condition on")
+    p.add_argument("--doc-type", default="adventure", help="document type to condition on")
+    p.add_argument("--prompt", default="")
+    p.add_argument("--max-new-tokens", type=int, default=512)
+    p.add_argument("--temperature", type=float, default=0.8)
+    p.add_argument("--top-k", type=int, default=None)
+    p.add_argument("--top-p", type=float, default=0.95)
+    p.add_argument("--repetition-penalty", type=float, default=1.1)
+    p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--device", default=None)
+    p.set_defaults(func=_cmd_generate)
 
     args = parser.parse_args(argv)
     if args.command is None:

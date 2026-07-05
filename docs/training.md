@@ -83,11 +83,17 @@ Q8_0 is the recommended quant at these model sizes; compare the others
 against it before shipping.
 
 Validate in llama.cpp directly (note: no `<|bos|>` in the prompt — the GGUF
-sets `add_bos_token=true`):
+sets `add_bos_token=true`; current llama.cpp uses `llama-completion` for raw
+completion, `llama-cli` is chat-only):
 
 ```bash
-llama-cli -m exports/keith-llm-125m-Q8_0.gguf --special \
+llama-completion -m exports/keith-llm-125m-Q8_0.gguf --special \
     -p '<|system:dnd5e|><|doc:adventure|>The village of Emberfall' -n 200
+
+# tokenizer parity: these two must print identical id lists
+llama-tokenize -m exports/keith-llm-125m-Q8_0.gguf -p "some test text" --ids
+python -c 'from keith_llm.tokenizer.wrapper import KeithTokenizer as K; \
+    t=K.load("data/tokenizer/tokenizer.json"); print([t.bos_id]+t.encode("some test text"))'
 ```
 
 Register and run with ollama:

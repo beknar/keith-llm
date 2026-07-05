@@ -22,6 +22,15 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_fetch_5etools(args: argparse.Namespace) -> int:
+    from keith_llm.data.fivetools import fetch_all
+
+    categories = tuple(args.categories.split(","))
+    stats = fetch_all(args.base_url, args.out_dir, categories=categories)
+    print(json.dumps(stats, indent=2))
+    return 1 if stats["files"] == 0 else 0
+
+
 def _cmd_train_tokenizer(args: argparse.Namespace) -> int:
     from keith_llm.tokenizer.train import train_bpe
 
@@ -142,6 +151,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default="data/processed/corpus.jsonl")
     p.add_argument("--root", default=".", help="directory manifest globs are relative to")
     p.set_defaults(func=_cmd_ingest)
+
+    p = sub.add_parser(
+        "fetch-5etools",
+        help="import a self-hosted 5etools mirror as raw text into data/raw/dnd5e",
+    )
+    p.add_argument("--base-url", required=True, help="e.g. http://192.168.1.64")
+    p.add_argument("--out-dir", default="data/raw/dnd5e")
+    p.add_argument("--categories", default="adventures,books,bestiary")
+    p.set_defaults(func=_cmd_fetch_5etools)
 
     p = sub.add_parser("train-tokenizer", help="train the byte-level BPE tokenizer")
     p.add_argument("--corpus", default="data/processed/corpus.jsonl")

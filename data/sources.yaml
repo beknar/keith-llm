@@ -54,3 +54,15 @@ sources:
     doc_type: adventure
     license: proprietary
     publishable: false
+
+  - glob: data/raw/dnd5e/rules/**/*
+    system: dnd5e
+    doc_type: rules
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/dnd5e/bestiary/**/*
+    system: dnd5e
+    doc_type: bestiary
+    license: proprietary
+    publishable: false

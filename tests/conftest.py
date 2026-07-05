@@ -40,7 +40,7 @@ def build_pdf(page_texts: list[str]) -> bytes:
     return bytes(out)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def make_pdf():
     return build_pdf
 
@@ -87,6 +87,11 @@ def synthetic_corpus_records(n_docs: int = 36) -> list[dict]:
             }
         )
     return records
+
+
+@pytest.fixture(scope="session")
+def corpus_records_factory():
+    return synthetic_corpus_records
 
 
 @pytest.fixture(scope="session")

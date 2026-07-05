@@ -1,0 +1,26 @@
+Create a new project for the creation of a new LLM tool stack,
+training loop, tokenization, quantization, GGUF export, ollama or
+llama.cpp integration for a 1-500 million parameter model.  This 
+model will be trained on the narrow domain of fantasy TTRPG
+adventures and a variety of rule systems such as d&d 5e, savage 
+worlds, and the d6 system.  The goal of this project is to be able
+to generate fantasy TTRPG adventures for various rule systems and
+to be able to create new rule systems.
+This model is meant to run on nvidia
+CUDA systems.  The project should be written in python in a virtual
+python environment.  The project's local repo is in this current
+directory, but should be tested on another host that has nvidia-smi
+running on it here: storm@zulu.  The account 'storm' has sudo
+privileges on that host and the project should be implemented in this
+remote directory: zulu:/genai/keit-llm.  The github repo is: 
+https://github.com/beknar/keith-llm.  When new code is written, there
+should be unit tests written along with it, as well as integration tests.
+Soak tests should be written in order to test for CPU and memory leaks 
+that appear during longer runs of the code.  The usual workflow should be
+branch -> new PR -> review PR -> merge PR.  Create a claude.md with a 
+brief summary of the project, the project's goal, and a map of the 
+codebase.  Create a README.md with an expanded explanation of the 
+project, technologies to be used, highlights, links to the documentation,
+Requirements, a getting started section, how to run tests, the project
+structure, future features, and a license section to use the Apache License
+2.0

@@ -120,6 +120,22 @@ keith-llm/
 └── docs/                    # runbooks
 ```
 
+## Status: first training run (July 2026)
+
+The full pipeline has been exercised end-to-end on an RTX 4090:
+
+- Seed corpus: D&D 5.1 SRD (CC-BY-4.0) + seven OpenD6/OGL books → 8 documents,
+  ~4.4M characters, 1.09M train / 117k val tokens (vocab 16,384)
+- `25m` preset (~29M params), 600 steps @ ~450k tokens/sec bf16+compile,
+  train loss 6.2 → 1.58 (the corpus is memorization-scale for now — grow
+  `data/raw/` before trusting val loss)
+- Exported `keith-llm-25m` GGUFs (f16/Q8_0/Q5_K_M/Q4_K_M); llama.cpp
+  tokenization verified **byte-identical** to the Python tokenizer; control
+  tokens parse as single specials; served via `ollama run keith-llm-25m`
+- CUDA soak tests passed on the 4090: 10,000 training steps and 2,000
+  generation cycles with flat RSS and CUDA-allocated memory
+- The 125m+ presets are wired up and waiting on a larger corpus
+
 ## Future features
 
 - Instruction-tuning pass (adventure outline → full adventure) on top of the

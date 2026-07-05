@@ -14,11 +14,11 @@ cd "$LLAMACPP_DIR"
 git pull --ff-only || true
 
 cmake -B build $CMAKE_FLAGS
-cmake --build build -j"$(nproc)" --target llama-quantize llama-cli
+cmake --build build -j"$(nproc)" --target llama-quantize llama-completion llama-tokenize
 
 BIN_DIR="$LLAMACPP_DIR/build/bin"
 echo
-echo "built: $BIN_DIR/llama-quantize, $BIN_DIR/llama-cli"
+echo "built: $BIN_DIR/llama-quantize, $BIN_DIR/llama-completion, $BIN_DIR/llama-tokenize"
 echo "add to your shell profile:"
 echo "  export LLAMA_QUANTIZE=$BIN_DIR/llama-quantize"
 echo "  export PATH=\$PATH:$BIN_DIR"

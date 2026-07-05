@@ -49,7 +49,7 @@ end-to-end and a model small enough to train on one RTX 4090.
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md) — project summary and codebase map
-- [docs/training.md](docs/training.md) — GPU training runbook (added with the ops phase)
+- [docs/training.md](docs/training.md) — GPU training runbook (setup → train → quantize → ollama)
 - [data/sources.yaml](data/sources.yaml) — corpus manifest format
 
 ## Requirements
@@ -87,7 +87,9 @@ keith-llm ollama --gguf exports/keith-llm-125m-Q8_0.gguf --name keith-llm-125m
 ollama run keith-llm-125m
 ```
 
-(Subcommands land incrementally; each PR wires up its stage.)
+On the GPU host, `scripts/train_zulu.sh configs/125m.yaml my-run` wraps the
+train step in tmux so it survives disconnects — see
+[docs/training.md](docs/training.md) for the full runbook.
 
 ## Running tests
 

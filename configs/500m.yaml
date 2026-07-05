@@ -1,0 +1,32 @@
+# ~486M params. Max preset for the 24GB RTX 4090.
+# ffn_hidden is 4352 (not a rounder number) so every tensor row stays a
+# multiple of 256, which llama.cpp k-quants require.
+model:
+  vocab_size: 16384
+  d_model: 1280
+  n_layers: 20
+  n_heads: 20
+  ffn_hidden: 4352
+  max_seq_len: 2048
+  rope_theta: 10000.0
+  norm_eps: 1.0e-5
+  dropout: 0.0
+  tie_embeddings: true
+train:
+  batch_size: 6
+  grad_accum: 10
+  max_steps: 5000
+  lr: 2.5e-4
+  min_lr: 2.5e-5
+  warmup_steps: 500
+  weight_decay: 0.1
+  grad_clip: 1.0
+  eval_interval: 250
+  eval_batches: 50
+  sample_interval: 500
+  checkpoint_interval: 500
+  dtype: bfloat16
+  compile: true
+  seed: 1337
+  data_dir: data/tokens
+  out_dir: checkpoints/500m

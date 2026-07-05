@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keith-llm"
+version = "0.1.0"
+description = "Small-LLM tool stack for generating fantasy TTRPG adventures and rule systems"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+authors = [{ name = "beknar" }]
+dependencies = [
+    "torch>=2.7",
+    "numpy>=1.26",
+    "tokenizers>=0.19",
+    "pyyaml>=6.0",
+    "gguf>=0.10",
+    "pypdf>=4.0",
+    "ftfy>=6.1",
+    "psutil>=5.9",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+keith-llm = "keith_llm.cli:main"
+
+[project.urls]
+Repository = "https://github.com/beknar/keith-llm"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: end-to-end pipeline tests (kept fast enough for CI)",
+    "soak: long-running memory-leak tests, excluded from CI",
+]
+addopts = "-m 'not soak'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]

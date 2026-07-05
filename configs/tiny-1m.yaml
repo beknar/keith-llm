@@ -1,0 +1,31 @@
+# ~1.2M params. CPU-friendly preset used by tests and local smoke runs.
+# NOTE: dims are NOT multiples of 256, so this preset is Q8_0-only (no k-quants).
+model:
+  vocab_size: 16384
+  d_model: 64
+  n_layers: 2
+  n_heads: 2
+  ffn_hidden: 256
+  max_seq_len: 256
+  rope_theta: 10000.0
+  norm_eps: 1.0e-5
+  dropout: 0.0
+  tie_embeddings: true
+train:
+  batch_size: 8
+  grad_accum: 1
+  max_steps: 200
+  lr: 3.0e-4
+  min_lr: 3.0e-5
+  warmup_steps: 20
+  weight_decay: 0.1
+  grad_clip: 1.0
+  eval_interval: 100
+  eval_batches: 10
+  sample_interval: 0
+  checkpoint_interval: 100
+  dtype: float32
+  compile: false
+  seed: 1337
+  data_dir: data/tokens
+  out_dir: checkpoints/tiny-1m

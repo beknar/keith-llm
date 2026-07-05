@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      # The /whl/cpu index keeps torch to the ~200MB CPU wheel; the default
+      # PyPI Linux wheel is a multi-GB CUDA build.
+      - run: pip install -e ".[dev]" --extra-index-url https://download.pytorch.org/whl/cpu
+      - run: pytest -m "not soak" -x -q

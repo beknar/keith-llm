@@ -104,6 +104,31 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_export(args: argparse.Namespace) -> int:
+    from keith_llm.export.gguf_export import export_gguf
+
+    out = export_gguf(args.ckpt, args.tokenizer, args.out, name=args.name)
+    print(out)
+    return 0
+
+
+def _cmd_quantize(args: argparse.Namespace) -> int:
+    from keith_llm.export.quantize import quantize
+
+    out = quantize(args.gguf, args.qtype, out_path=args.out, bin_path=args.bin)
+    print(out)
+    return 0
+
+
+def _cmd_ollama(args: argparse.Namespace) -> int:
+    from keith_llm.export.ollama import register, write_modelfile
+
+    modelfile = write_modelfile(args.gguf)
+    register(args.name, modelfile)
+    print(f"registered {args.name}; try: ollama run {args.name}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="keith-llm",
@@ -156,6 +181,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--device", default=None)
     p.set_defaults(func=_cmd_generate)
+
+    p = sub.add_parser("export", help="export a checkpoint to f16 GGUF (llama arch)")
+    p.add_argument("--ckpt", required=True)
+    p.add_argument("--tokenizer", default="data/tokenizer/tokenizer.json")
+    p.add_argument("--out", required=True)
+    p.add_argument("--name", default="keith-llm")
+    p.set_defaults(func=_cmd_export)
+
+    p = sub.add_parser("quantize", help="quantize a GGUF via llama.cpp llama-quantize")
+    p.add_argument("gguf")
+    p.add_argument("qtype", choices=["Q8_0", "Q5_K_M", "Q4_K_M"])
+    p.add_argument("--out", default=None)
+    p.add_argument("--bin", default=None, help="path to llama-quantize (or $LLAMA_QUANTIZE)")
+    p.set_defaults(func=_cmd_quantize)
+
+    p = sub.add_parser("ollama", help="write a Modelfile and register the GGUF with ollama")
+    p.add_argument("--gguf", required=True)
+    p.add_argument("--name", default="keith-llm")
+    p.set_defaults(func=_cmd_ollama)
 
     args = parser.parse_args(argv)
     if args.command is None:

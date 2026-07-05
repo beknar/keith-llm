@@ -22,6 +22,22 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_train_tokenizer(args: argparse.Namespace) -> int:
+    from keith_llm.tokenizer.train import train_bpe
+
+    tok = train_bpe(args.corpus, args.out, vocab_size=args.vocab_size)
+    print(f"vocab_size={tok.vocab_size} -> {args.out}")
+    return 0
+
+
+def _cmd_binarize(args: argparse.Namespace) -> int:
+    from keith_llm.data.binarize import binarize
+
+    meta = binarize(args.corpus, args.tokenizer, args.out_dir, val_mod=args.val_mod)
+    print(json.dumps(meta, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="keith-llm",
@@ -35,6 +51,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default="data/processed/corpus.jsonl")
     p.add_argument("--root", default=".", help="directory manifest globs are relative to")
     p.set_defaults(func=_cmd_ingest)
+
+    p = sub.add_parser("train-tokenizer", help="train the byte-level BPE tokenizer")
+    p.add_argument("--corpus", default="data/processed/corpus.jsonl")
+    p.add_argument("--out", default="data/tokenizer/tokenizer.json")
+    p.add_argument("--vocab-size", type=int, default=16384)
+    p.set_defaults(func=_cmd_train_tokenizer)
+
+    p = sub.add_parser("binarize", help="tokenize the corpus into uint16 train/val bins")
+    p.add_argument("--corpus", default="data/processed/corpus.jsonl")
+    p.add_argument("--tokenizer", default="data/tokenizer/tokenizer.json")
+    p.add_argument("--out-dir", default="data/tokens")
+    p.add_argument("--val-mod", type=int, default=50, help="1-in-N documents go to val")
+    p.set_defaults(func=_cmd_binarize)
 
     args = parser.parse_args(argv)
     if args.command is None:

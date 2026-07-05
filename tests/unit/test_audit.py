@@ -19,6 +19,12 @@ INTERLEAVED = (
 # A broken text layer yields vowelless gibberish.
 GIBBERISH = "brtsk wxqz fghj mntp zzzk vvbb qwrt plld " * 20
 
+# pypdf's multi-column failure: real words, intact, but one per line and in
+# scrambled order. Token metrics look fine; words-per-line is the tell.
+WORD_SALAD = "\n".join(
+    ["The", "village", "of", "Emberfall", "sits", "at", "the", "edge", "of", "mirewood"] * 40
+)
+
 # Dense stat-block content: low alpha ratio, but legitimately extracted.
 STATBLOCK = (
     "Mire Goblin\nSmall humanoid, neutral evil\nArmor Class 15\n"
@@ -41,6 +47,15 @@ def test_interleaved_text_is_bad():
 def test_gibberish_is_bad():
     m = score_text(GIBBERISH)
     assert m["wordlike_frac"] < 0.60
+    assert m["verdict"] == "BAD"
+
+
+def test_word_salad_flagged_despite_intact_words():
+    # The column-failure case that token metrics alone miss: every word is a
+    # real word, but one-per-line reading order is broken.
+    m = score_text(WORD_SALAD)
+    assert m["wordlike_frac"] > 0.80  # words themselves are fine
+    assert m["words_per_line"] < 2.0
     assert m["verdict"] == "BAD"
 
 

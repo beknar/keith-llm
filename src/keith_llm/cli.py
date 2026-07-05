@@ -35,11 +35,11 @@ def _cmd_audit_corpus(args: argparse.Namespace) -> int:
     print(f"documents: {report['n_documents']}  verdicts: {report['verdicts']}")
     worst = [d for d in report["documents"] if d["verdict"] != "OK"][: args.top]
     if worst:
-        print(f"\n{'verdict':<5} {'wordlike':>8} {'intCaps':>8} {'alpha':>6}  source")
+        print(f"\n{'verdict':<5} {'wordlike':>8} {'intCaps':>8} {'w/line':>7} {'alpha':>6}  source")
         for d in worst:
             print(
                 f"{d['verdict']:<5} {d['wordlike_frac']:>8.2f} {d['internal_caps_rate']:>8.2f} "
-                f"{d['alpha_ratio']:>6.2f}  {d['source']}"
+                f"{d['words_per_line']:>7.1f} {d['alpha_ratio']:>6.2f}  {d['source']}"
             )
     else:
         print("all documents look clean")

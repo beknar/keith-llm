@@ -17,6 +17,10 @@ Signals (all dependency-free heuristics):
 - ``long_token_frac``   fraction of whitespace tokens over 30 chars — runs of
                         concatenated words.
 - ``garbage_line_frac`` fraction of non-blank lines that are mostly non-letters.
+- ``words_per_line``    mean tokens per non-blank line. A text-dense document
+                        reading ~1 word per line is the signature of pypdf's
+                        column failure (words intact but one-per-line), which
+                        the token metrics above miss.
 
 Stat-block-heavy TTRPG text is legitimately low on ``alpha_ratio``, so the
 BAD/WARN verdict leans on ``wordlike_frac`` and ``internal_caps_rate``, which
@@ -55,13 +59,22 @@ def _alpha_cores(text: str) -> list[str]:
 
 
 def _verdict(m: dict[str, float]) -> str:
-    if m["wordlike_frac"] < 0.60 or m["internal_caps_rate"] > 0.15 or m["alpha_ratio"] < 0.30:
+    # The words-per-line signal only means something on a substantial document;
+    # a genuinely short list would trip it spuriously.
+    dense = m["n_tokens"] > 200
+    if (
+        m["wordlike_frac"] < 0.60
+        or m["internal_caps_rate"] > 0.15
+        or m["alpha_ratio"] < 0.30
+        or (dense and m["words_per_line"] < 2.0)
+    ):
         return "BAD"
     if (
         m["wordlike_frac"] < 0.80
         or m["internal_caps_rate"] > 0.06
         or m["long_token_frac"] > 0.02
         or m["garbage_line_frac"] > 0.50
+        or (dense and m["words_per_line"] < 4.0)
     ):
         return "WARN"
     return "OK"
@@ -93,6 +106,7 @@ def score_text(text: str) -> dict[str, Any]:
         if ns and sum(c.isalpha() for c in ns) / len(ns) < 0.35:
             garbage_lines += 1
     garbage_line_frac = garbage_lines / len(lines) if lines else 0.0
+    words_per_line = n_tokens / len(lines) if lines else float(n_tokens)
 
     metrics = {
         "n_chars": len(text),
@@ -103,6 +117,7 @@ def score_text(text: str) -> dict[str, Any]:
         "long_token_frac": round(long_token_frac, 4),
         "mean_word_len": round(mean_word_len, 2),
         "garbage_line_frac": round(garbage_line_frac, 4),
+        "words_per_line": round(words_per_line, 2),
     }
     metrics["verdict"] = _verdict(metrics)
     return metrics

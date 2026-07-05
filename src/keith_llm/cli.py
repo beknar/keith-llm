@@ -38,6 +38,31 @@ def _cmd_binarize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_train(args: argparse.Namespace) -> int:
+    from dataclasses import replace
+
+    from keith_llm.config import load_config
+    from keith_llm.train.loop import Trainer
+
+    model_cfg, train_cfg = load_config(args.config)
+    if args.data_dir:
+        train_cfg = replace(train_cfg, data_dir=args.data_dir)
+    if args.out_dir:
+        train_cfg = replace(train_cfg, out_dir=args.out_dir)
+    if args.max_steps:
+        train_cfg = replace(train_cfg, max_steps=args.max_steps)
+    trainer = Trainer(
+        model_cfg,
+        train_cfg,
+        device=args.device,
+        resume=args.resume,
+        tokenizer_path=args.tokenizer,
+    )
+    final_loss = trainer.train()
+    print(f"done: step={trainer.step} loss={final_loss:.4f} out={train_cfg.out_dir}")
+    return 0
+
+
 def _cmd_generate(args: argparse.Namespace) -> int:
     import torch
 
@@ -105,6 +130,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out-dir", default="data/tokens")
     p.add_argument("--val-mod", type=int, default=50, help="1-in-N documents go to val")
     p.set_defaults(func=_cmd_binarize)
+
+    p = sub.add_parser("train", help="train a model from token bins")
+    p.add_argument("--config", required=True)
+    p.add_argument("--data-dir", default=None, help="override train.data_dir")
+    p.add_argument("--out-dir", default=None, help="override train.out_dir")
+    p.add_argument("--max-steps", type=int, default=None, help="override train.max_steps")
+    p.add_argument("--resume", default=None, help="checkpoint to resume from")
+    p.add_argument("--tokenizer", default="data/tokenizer/tokenizer.json")
+    p.add_argument("--device", default=None)
+    p.set_defaults(func=_cmd_train)
 
     p = sub.add_parser("generate", help="generate text from a trained checkpoint")
     p.add_argument("--config", required=True)

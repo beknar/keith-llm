@@ -54,7 +54,7 @@ def _split_of(rec, records):
     # Mirrors binarize's val logic for val_mod=5, including the promotion rule.
     val = {r["id"] for r in records if int(r["id"][:8], 16) % 5 == 0}
     if not val and len(records) > 1:
-        val = {min(r["id"] for r in records)}
+        val = {min(records, key=lambda r: (len(r["text"]), r["id"]))["id"]}
     return "val" if rec["id"] in val else "train"
 
 
@@ -69,6 +69,8 @@ def test_val_promotion_when_nothing_hashes_to_val(tiny_corpus, tiny_tokenizer_pa
     meta = binarize(corpus, tiny_tokenizer_path, tmp_path / "bins", val_mod=val_mod)
     assert meta["n_val_documents"] == 1
     assert meta["n_val_tokens"] > 0
+    # The smaller document is the one promoted.
+    assert meta["n_val_tokens"] <= meta["n_train_tokens"]
 
 
 def test_empty_corpus_rejected(tiny_tokenizer_path, tmp_path):

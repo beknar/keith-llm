@@ -32,7 +32,20 @@ scripts/fetch_seed_data.sh    # SRD 5.1 + OpenD6 into data/seed/
 keith-llm ingest              # -> data/processed/corpus.jsonl
 ```
 
-Eyeball the corpus before tokenizing: `shuf -n 3 data/processed/corpus.jsonl | jq -r .text | less`
+PDFs are extracted column-aware via pdfplumber (with a pypdf fallback), which
+fixes the multi-column reading-order corruption on rulebooks and modules.
+Audit extraction quality before tokenizing — this scores each document and
+lists the worst offenders (usually bad PDFs) so you can fix or drop them:
+
+```bash
+keith-llm audit-corpus --out data/processed/audit.json
+# verdict BAD/WARN flags low wordlike-fraction or high internal-caps
+# (column-interleave) documents; OK docs are omitted from the printout
+```
+
+Then eyeball a few flagged docs: `jq -r '.documents[] | select(.verdict!="OK")
+| .source' data/processed/audit.json` and read them with
+`shuf -n 3 data/processed/corpus.jsonl | jq -r .text | less`.
 
 ```bash
 keith-llm train-tokenizer     # -> data/tokenizer/tokenizer.json (vocab 16384)

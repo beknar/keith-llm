@@ -13,16 +13,16 @@ model:
 train:
   batch_size: 32
   grad_accum: 1
-  max_steps: 3000
+  max_steps: 600          # ~23 epochs of the ~840k-token seed corpus; raise with corpus growth
   lr: 8.0e-4
   min_lr: 8.0e-5
-  warmup_steps: 300
+  warmup_steps: 60
   weight_decay: 0.1
   grad_clip: 1.0
-  eval_interval: 250
-  eval_batches: 50
-  sample_interval: 500
-  checkpoint_interval: 500
+  eval_interval: 50
+  eval_batches: 20
+  sample_interval: 200
+  checkpoint_interval: 200
   dtype: bfloat16
   compile: true
   seed: 1337

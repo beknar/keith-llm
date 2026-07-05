@@ -37,17 +37,25 @@ def binarize(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pass 1: decide the val set from doc ids only.
-    doc_ids = []
+    # Pass 1: decide the val set from doc ids and sizes.
+    doc_sizes: dict[str, int] = {}
     with open(corpus_jsonl) as fh:
         for line in fh:
-            doc_ids.append(json.loads(line)["id"])
-    if not doc_ids:
+            rec = json.loads(line)
+            doc_sizes[rec["id"]] = len(rec["text"])
+    if not doc_sizes:
         raise ValueError(f"empty corpus: {corpus_jsonl}")
-    val_ids = {d for d in doc_ids if _is_val(d, val_mod)}
-    if not val_ids and len(doc_ids) > 1:
-        val_ids = {min(doc_ids)}
-        logger.warning("no document hashed into val; promoted %s", min(doc_ids)[:12])
+    val_ids = {d for d in doc_sizes if _is_val(d, val_mod)}
+    if not val_ids and len(doc_sizes) > 1:
+        # Promote the SMALLEST document: on few-document corpora this keeps
+        # the training set nearly intact while still giving val a real doc.
+        smallest = min(doc_sizes, key=lambda d: (doc_sizes[d], d))
+        val_ids = {smallest}
+        logger.warning(
+            "no document hashed into val; promoted smallest doc %s (%d chars)",
+            smallest[:12],
+            doc_sizes[smallest],
+        )
 
     # Pass 2: encode and stream to the bins.
     counts = {"train": 0, "val": 0}
@@ -72,7 +80,7 @@ def binarize(
         "vocab_size": tok.vocab_size,
         "n_train_tokens": counts["train"],
         "n_val_tokens": counts["val"],
-        "n_documents": len(doc_ids),
+        "n_documents": len(doc_sizes),
         "n_val_documents": len(val_ids),
         "tokenizer_sha1": hashlib.sha1(Path(tokenizer_path).read_bytes()).hexdigest(),
     }

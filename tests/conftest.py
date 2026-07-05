@@ -107,3 +107,13 @@ def tiny_tokenizer_path(tmp_path_factory, tiny_corpus):
     path = tmp_path_factory.mktemp("tokenizer") / "tokenizer.json"
     train_bpe(tiny_corpus, path, vocab_size=512)
     return path
+
+
+@pytest.fixture(scope="session")
+def tiny_bins(tmp_path_factory, tiny_corpus, tiny_tokenizer_path):
+    """Binarized tiny corpus: (tokens_dir, meta dict)."""
+    from keith_llm.data.binarize import binarize
+
+    out_dir = tmp_path_factory.mktemp("tiny_tokens")
+    meta = binarize(tiny_corpus, tiny_tokenizer_path, out_dir, val_mod=5)
+    return out_dir, meta

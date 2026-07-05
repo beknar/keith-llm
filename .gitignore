@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Data (manifest is tracked; corpora, bins, and trained artifacts are not)
+data/*
+!data/sources.yaml
+
+# Training and export artifacts
+checkpoints/
+exports/
+*.gguf
+*.pt

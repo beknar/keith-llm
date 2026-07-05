@@ -17,9 +17,21 @@ sources:
     license: CC-BY-4.0
     publishable: true
 
-  - glob: data/seed/opend6/**/*
+  - glob: data/seed/opend6/rules/**/*
     system: d6
     doc_type: rules
+    license: OGL-1.0a
+    publishable: true
+
+  - glob: data/seed/opend6/bestiary/**/*
+    system: d6
+    doc_type: bestiary
+    license: OGL-1.0a
+    publishable: true
+
+  - glob: data/seed/opend6/setting/**/*
+    system: d6
+    doc_type: setting
     license: OGL-1.0a
     publishable: true
 

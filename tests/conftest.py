@@ -43,3 +43,67 @@ def build_pdf(page_texts: list[str]) -> bytes:
 @pytest.fixture
 def make_pdf():
     return build_pdf
+
+
+_NOUNS = ["goblin", "wyvern", "lich", "barrow", "tavern", "relic", "warden", "mire", "keep"]
+_VERBS = ["ambushes", "guards", "haunts", "curses", "seeks", "burns", "buries", "awakens"]
+_TAILS = [
+    "beneath the shattered bridge",
+    "at the edge of the mirewood",
+    "inside the sunken temple",
+    "when the second moon rises",
+    "for 2d6+3 fire damage",
+    "unless a DC 15 Wisdom save succeeds",
+    "while the caravan sleeps",
+]
+
+
+def synthetic_corpus_records(n_docs: int = 36) -> list[dict]:
+    """Small but varied TTRPG-flavored corpus spread across all systems and
+    doc types. Deterministic; ~50-80 unique sentences per document."""
+    from keith_llm.constants import DOC_TYPES, SYSTEMS
+
+    records = []
+    for d in range(n_docs):
+        sentences = []
+        for s in range(60):
+            i = d * 60 + s
+            sentences.append(
+                f"The {_NOUNS[i % len(_NOUNS)]} {_VERBS[(i // 3) % len(_VERBS)]} "
+                f"the {_NOUNS[(i + 4) % len(_NOUNS)]} {_TAILS[(i // 2) % len(_TAILS)]}."
+            )
+        text = " ".join(sentences)
+        import hashlib
+
+        records.append(
+            {
+                "id": hashlib.sha1(text.encode()).hexdigest(),
+                "source": f"doc{d}.txt",
+                "system": SYSTEMS[d % len(SYSTEMS)],
+                "doc_type": DOC_TYPES[d % len(DOC_TYPES)],
+                "license": "CC-BY-4.0",
+                "publishable": True,
+                "text": text,
+            }
+        )
+    return records
+
+
+@pytest.fixture(scope="session")
+def tiny_corpus(tmp_path_factory):
+    import json
+
+    path = tmp_path_factory.mktemp("corpus") / "corpus.jsonl"
+    with path.open("w") as fh:
+        for rec in synthetic_corpus_records():
+            fh.write(json.dumps(rec) + "\n")
+    return path
+
+
+@pytest.fixture(scope="session")
+def tiny_tokenizer_path(tmp_path_factory, tiny_corpus):
+    from keith_llm.tokenizer.train import train_bpe
+
+    path = tmp_path_factory.mktemp("tokenizer") / "tokenizer.json"
+    train_bpe(tiny_corpus, path, vocab_size=512)
+    return path

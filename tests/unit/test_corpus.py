@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from keith_llm.data import corpus as corpus_mod
 from keith_llm.data.corpus import build_corpus, filter_publishable, load_manifest
 
 REPO_MANIFEST = Path(__file__).resolve().parents[2] / "data" / "sources.yaml"
@@ -80,6 +81,71 @@ def test_build_corpus_end_to_end(tmp_path):
     assert by_system["savage_worlds"]["publishable"] is False
     assert all(len(r["id"]) == 40 for r in records)
     assert by_system["dnd5e"]["source"].startswith("docs/dnd/")
+
+
+def _one_txt_manifest(root: Path, text: str) -> Path:
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "docs" / "book.txt").write_text(text)
+    manifest = root / "m.yaml"
+    manifest.write_text(
+        "sources:\n"
+        "  - glob: 'docs/**/*'\n    system: dnd5e\n    doc_type: rules\n"
+        "    license: CC-BY-4.0\n    publishable: true\n"
+    )
+    return manifest
+
+
+def test_reingest_uses_cache_and_skips_extraction(tmp_path, monkeypatch):
+    manifest = _one_txt_manifest(tmp_path, PROSE)
+    out = tmp_path / "corpus.jsonl"
+
+    first = build_corpus(manifest, out, root=tmp_path)
+    assert first["cache_hits"] == 0  # cold cache: extracted
+    assert first["documents"] == 1
+
+    # On the second run, extraction MUST NOT be called — the cache serves it.
+    def boom(*a, **k):
+        raise AssertionError("extract_pages must not run for a cached unchanged file")
+
+    monkeypatch.setattr(corpus_mod, "extract_pages", boom)
+    second = build_corpus(manifest, out, root=tmp_path)
+    assert second["cache_hits"] == 1
+    assert second["documents"] == 1
+    # identical corpus produced from cache
+    assert out.read_text() == (tmp_path / "corpus.jsonl").read_text()
+
+
+def test_changed_file_is_reextracted(tmp_path):
+    manifest = _one_txt_manifest(tmp_path, PROSE)
+    out = tmp_path / "corpus.jsonl"
+    build_corpus(manifest, out, root=tmp_path)
+
+    # Modify the file's content -> new hash -> cache miss -> re-extracted.
+    (tmp_path / "docs" / "book.txt").write_text(
+        PROSE.replace("Emberfall", "Duskholt").replace("barrow", "cavern")
+    )
+    stats = build_corpus(manifest, out, root=tmp_path)
+    assert stats["cache_hits"] == 0
+    text = json.loads(out.read_text())["text"]
+    assert "Duskholt" in text
+
+
+def test_no_cache_flag_bypasses_cache(tmp_path):
+    manifest = _one_txt_manifest(tmp_path, PROSE)
+    out = tmp_path / "corpus.jsonl"
+    build_corpus(manifest, out, root=tmp_path, use_cache=True)
+    stats = build_corpus(manifest, out, root=tmp_path, use_cache=False)
+    assert stats["cache_hits"] == 0  # cache ignored even though an entry exists
+
+
+def test_corrupt_cache_degrades_gracefully(tmp_path):
+    manifest = _one_txt_manifest(tmp_path, PROSE)
+    out = tmp_path / "corpus.jsonl"
+    cache_file = tmp_path / "data" / "cache" / "extraction.sqlite"
+    cache_file.parent.mkdir(parents=True)
+    cache_file.write_bytes(b"not a sqlite database at all")
+    stats = build_corpus(manifest, out, root=tmp_path)
+    assert stats["documents"] == 1  # still ingests, just without the cache
 
 
 def test_build_corpus_expands_archives(tmp_path):

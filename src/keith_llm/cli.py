@@ -17,7 +17,13 @@ from keith_llm import __version__
 def _cmd_ingest(args: argparse.Namespace) -> int:
     from keith_llm.data.corpus import build_corpus
 
-    stats = build_corpus(args.manifest, args.out, root=args.root, enable_ocr=not args.no_ocr)
+    stats = build_corpus(
+        args.manifest,
+        args.out,
+        root=args.root,
+        enable_ocr=not args.no_ocr,
+        use_cache=not args.no_cache,
+    )
     print(json.dumps(stats, indent=2))
     return 0
 
@@ -272,6 +278,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--root", default=".", help="directory manifest globs are relative to")
     p.add_argument(
         "--no-ocr", action="store_true", help="skip OCR of image-only PDF pages (faster)"
+    )
+    p.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="ignore the extraction cache and re-extract every file",
     )
     p.set_defaults(func=_cmd_ingest)
 

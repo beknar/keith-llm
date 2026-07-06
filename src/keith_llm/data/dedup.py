@@ -59,19 +59,25 @@ def paragraph_dedup(
     return out
 
 
-def _shingles(text: str, k: int = 5) -> set[str]:
+def shingle_hashes(text: str, k: int = 5) -> set[int]:
+    """Deterministic 64-bit hashes of the text's distinct k-word shingles.
+
+    Shared by MinHash signing here and by the overlap report, so both use one
+    shingling definition.
+    """
     words = _norm(text).split()
     if not words:
         return set()
     if len(words) < k:
-        return {" ".join(words)}
-    return {" ".join(words[i : i + k]) for i in range(len(words) - k + 1)}
+        grams = {" ".join(words)}
+    else:
+        grams = {" ".join(words[i : i + k]) for i in range(len(words) - k + 1)}
+    return {
+        int.from_bytes(hashlib.blake2b(g.encode(), digest_size=8).digest(), "big") for g in grams
+    }
 
 
-def _signature(shingles: set[str], perms: list[tuple[int, int]]) -> list[int]:
-    hashes = [
-        int.from_bytes(hashlib.blake2b(s.encode(), digest_size=8).digest(), "big") for s in shingles
-    ]
+def _signature(hashes: set[int], perms: list[tuple[int, int]]) -> list[int]:
     return [min((a * h + b) % _MERSENNE for h in hashes) for a, b in perms]
 
 
@@ -88,8 +94,8 @@ def minhash_dedup(
     perms = [(rng.randrange(1, _MERSENNE), rng.randrange(_MERSENNE)) for _ in range(num_hashes)]
     sigs: list[list[int] | None] = []
     for rec in records:
-        sh = _shingles(rec["text"])
-        sigs.append(_signature(sh, perms) if sh else None)
+        hs = shingle_hashes(rec["text"])
+        sigs.append(_signature(hs, perms) if hs else None)
 
     rows = num_hashes // bands
     buckets: dict[tuple[int, tuple[int, ...]], list[int]] = defaultdict(list)

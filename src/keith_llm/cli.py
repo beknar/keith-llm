@@ -22,6 +22,61 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_classify(args: argparse.Namespace) -> int:
+    from keith_llm.constants import SYSTEMS
+    from keith_llm.data.classify import apply_moves, classify_paths
+
+    if args.system not in SYSTEMS:
+        raise SystemExit(f"--system must be one of {SYSTEMS}")
+
+    results = classify_paths(
+        args.src,
+        system=args.system,
+        dest=args.dest,
+        enable_ocr=not args.no_ocr,
+        min_confidence=args.min_confidence,
+    )
+    if not results:
+        print(f"no classifiable documents found under {args.src}")
+        return 0
+
+    confident = [r for r in results if r.confident]
+    review = [r for r in results if not r.confident]
+    print(f"classified {len(results)} files (system={args.system}):\n")
+    for r in confident:
+        print(f"  {r.doc_type:<9} {r.confidence:.0%}  {r.path}  ->  {r.target}")
+    for r in review:
+        best = r.doc_type or "none"
+        print(f"  REVIEW    {r.confidence:.0%}  {r.path}  (best guess: {best}, too low to move)")
+
+    if not confident:
+        print("\nnothing confident enough to move; sort the REVIEW files by hand.")
+        return 0
+    if args.dry_run:
+        print(f"\n(dry run) {len(confident)} files would be moved.")
+        return 0
+
+    proceed = args.yes
+    if not proceed:
+        try:
+            answer = input(f"\nMove {len(confident)} files into {args.dest}/? [y/N] ")
+        except EOFError:
+            answer = "n"
+        proceed = answer.strip().lower() in ("y", "yes")
+
+    if not proceed:
+        print("no changes made.")
+        return 0
+    res = apply_moves(confident)
+    print(f"\nmoved {len(res['moved'])} files; skipped {len(res['skipped'])} (target existed).")
+    for p in res["skipped"]:
+        print(f"  skipped (name already at target): {p}")
+    print("Re-run 'keith-llm ingest' to pick them up with their new doc types.")
+    if review:
+        print(f"{len(review)} low-confidence files left in place for manual review.")
+    return 0
+
+
 def _cmd_audit_corpus(args: argparse.Namespace) -> int:
     from keith_llm.data.audit import audit_corpus
 
@@ -219,6 +274,21 @@ def main(argv: list[str] | None = None) -> int:
         "--no-ocr", action="store_true", help="skip OCR of image-only PDF pages (faster)"
     )
     p.set_defaults(func=_cmd_ingest)
+
+    p = sub.add_parser(
+        "classify",
+        help="suggest doc types for unsorted files and (after confirming) sort them",
+    )
+    p.add_argument("--src", required=True, help="file or directory of unsorted documents")
+    p.add_argument("--system", default="dnd5e", help="rule system these files belong to")
+    p.add_argument(
+        "--dest", default="data/raw", help="base dir to sort into (<dest>/<system>/<doc_type>/)"
+    )
+    p.add_argument("--min-confidence", type=float, default=0.45, help="below this, flag for review")
+    p.add_argument("--yes", "-y", action="store_true", help="apply moves without the prompt")
+    p.add_argument("--dry-run", action="store_true", help="show classifications, never move")
+    p.add_argument("--no-ocr", action="store_true", help="don't OCR scanned pages while sampling")
+    p.set_defaults(func=_cmd_classify)
 
     p = sub.add_parser(
         "audit-corpus",

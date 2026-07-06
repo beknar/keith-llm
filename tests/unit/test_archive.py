@@ -151,6 +151,24 @@ def test_decompression_bomb_member_is_capped(tmp_path, monkeypatch):
         assert [n for n, _ in members] == ["small.txt"]  # oversized member dropped
 
 
+def test_aggregate_budget_stops_extraction(tmp_path, monkeypatch):
+    # Many members each under the per-member cap must not blow past a total
+    # budget (the disk-exhaustion DoS): extraction stops once the budget is hit.
+    monkeypatch.setattr(archive, "_MAX_TOTAL_BYTES", 30)
+    z = tmp_path / "many.zip"
+    _write_zip(z, {f"a{i}.txt": b"x" * 20 for i in range(5)})
+    with extracted_documents(z, SUPPORTED_EXTS) as members:
+        assert len(members) == 1  # first fits (20 <= 30), rest exceed remaining budget
+
+
+def test_member_count_cap_stops_extraction(tmp_path, monkeypatch):
+    monkeypatch.setattr(archive, "_MAX_MEMBERS", 1)
+    z = tmp_path / "many.zip"
+    _write_zip(z, {"a.txt": PROSE, "b.txt": PROSE, "c.txt": PROSE})
+    with extracted_documents(z, SUPPORTED_EXTS) as members:
+        assert len(members) == 1
+
+
 def test_corrupt_archive_yields_nothing_or_raises(tmp_path):
     bad = tmp_path / "broken.zip"
     bad.write_bytes(b"this is not a zip file")

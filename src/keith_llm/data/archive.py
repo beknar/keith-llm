@@ -10,8 +10,10 @@ a document type), which also bounds recursion.
 Security: member-supplied paths are NEVER used as write destinations — each
 member is read and copied to a temp filename this module chooses — so
 path-traversal ("zip-slip", malicious ``..``/absolute tar members) cannot
-write outside the temp directory. Per-member output is capped to guard against
-decompression bombs. Non-regular members (dirs, symlinks, devices) are skipped.
+write outside the temp directory. Non-regular members (dirs, symlinks,
+devices) are skipped. Extraction is bounded three ways against decompression
+bombs: a per-member size cap, an aggregate byte budget, and a member count
+cap; hitting a limit stops extraction (logged) rather than filling the disk.
 """
 
 from __future__ import annotations
@@ -32,7 +34,9 @@ logger = logging.getLogger(__name__)
 
 _TAR_SUFFIXES = {".tar", ".tgz", ".tbz2", ".tbz", ".txz"}
 _SINGLE_OPENERS = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}
-_MAX_MEMBER_BYTES = 512 * 1024 * 1024  # 512 MB per member (decompression-bomb guard)
+_MAX_MEMBER_BYTES = 512 * 1024 * 1024  # 512 MB per member
+_MAX_TOTAL_BYTES = 4 * 1024 * 1024 * 1024  # 4 GB extracted per archive
+_MAX_MEMBERS = 10_000  # ingestible members per archive
 
 
 def is_archive(path: Path) -> bool:
@@ -49,19 +53,20 @@ def _doc_ext(name: str) -> str:
     return Path(name).suffix.lower()
 
 
-def _copy_capped(src, dest: Path) -> bool:
-    """Copy a binary stream to ``dest``, aborting if it exceeds the size cap.
-    Returns True on success, False (and removes the partial file) if too large."""
+def _copy_capped(src, dest: Path, cap: int) -> int | None:
+    """Copy a binary stream to ``dest``, aborting if it exceeds ``cap`` bytes.
+    Returns bytes written, or None (removing the partial file) if the cap is
+    exceeded. Checked incrementally, so an oversized member never fully lands."""
     written = 0
     with dest.open("wb") as out:
         while chunk := src.read(1 << 20):
             written += len(chunk)
-            if written > _MAX_MEMBER_BYTES:
+            if written > cap:
                 out.close()
                 dest.unlink(missing_ok=True)
-                return False
+                return None
             out.write(chunk)
-    return True
+    return written
 
 
 def _is_tar(path: Path) -> bool:
@@ -70,6 +75,44 @@ def _is_tar(path: Path) -> bool:
     if suffix in _TAR_SUFFIXES:
         return True
     return len(suffixes) >= 2 and suffixes[-2] == ".tar" and suffix in _SINGLE_OPENERS
+
+
+def _accept(
+    name: str,
+    src,
+    tmp: Path,
+    supported_exts: set[str],
+    out: list[tuple[str, Path]],
+    state: dict[str, int],
+    archive_name: str,
+) -> bool:
+    """Extract one member's stream if it is a supported document and within the
+    extraction budget. Mutates ``out``/``state``. Returns False to tell the
+    caller to STOP iterating (member-count or aggregate-byte limit reached)."""
+    ext = _doc_ext(name)
+    if ext not in supported_exts:
+        return True
+    if len(out) >= _MAX_MEMBERS:
+        logger.warning(
+            "archive %s exceeds %d ingestible members; stopping", archive_name, _MAX_MEMBERS
+        )
+        return False
+    remaining = _MAX_TOTAL_BYTES - state["total"]
+    dest = tmp / f"m{len(out)}{ext}"
+    written = _copy_capped(src, dest, min(_MAX_MEMBER_BYTES, remaining))
+    if written is None:
+        if remaining < _MAX_MEMBER_BYTES:
+            logger.warning(
+                "aggregate extraction budget (%d bytes) reached for %s; stopping",
+                _MAX_TOTAL_BYTES,
+                archive_name,
+            )
+            return False
+        logger.warning("archive member too large, skipping: %s!%s", archive_name, name)
+        return True
+    state["total"] += written
+    out.append((name, dest))
+    return True
 
 
 @contextmanager
@@ -83,56 +126,36 @@ def extracted_documents(path: Path, supported_exts: set[str]) -> Iterator[list[t
     """
     tmp = Path(tempfile.mkdtemp(prefix="keith_arch_"))
     out: list[tuple[str, Path]] = []
+    state = {"total": 0}
     try:
         if path.suffix.lower() == ".zip":
             with zipfile.ZipFile(path) as zf:
                 for info in zf.infolist():
                     if info.is_dir():
                         continue
-                    ext = _doc_ext(info.filename)
-                    if ext not in supported_exts:
-                        continue
-                    dest = tmp / f"m{len(out)}{ext}"
                     with zf.open(info) as src:
-                        ok = _copy_capped(src, dest)
-                    if ok:
-                        out.append((info.filename, dest))
-                    else:
-                        logger.warning(
-                            "archive member too large, skipping: %s!%s", path.name, info.filename
-                        )
+                        if not _accept(
+                            info.filename, src, tmp, supported_exts, out, state, path.name
+                        ):
+                            break
         elif _is_tar(path):
             with tarfile.open(path) as tf:
                 for member in tf.getmembers():
                     if not member.isfile():
                         continue
-                    ext = _doc_ext(member.name)
-                    if ext not in supported_exts:
-                        continue
                     src = tf.extractfile(member)
                     if src is None:
                         continue
-                    dest = tmp / f"m{len(out)}{ext}"
                     with src:
-                        ok = _copy_capped(src, dest)
-                    if ok:
-                        out.append((member.name, dest))
-                    else:
-                        logger.warning(
-                            "archive member too large, skipping: %s!%s", path.name, member.name
-                        )
+                        if not _accept(
+                            member.name, src, tmp, supported_exts, out, state, path.name
+                        ):
+                            break
         else:  # single-file compressor
             opener = _SINGLE_OPENERS[path.suffix.lower()]
             inner = path.name[: -len(path.suffix)]  # strip the compression suffix
-            ext = _doc_ext(inner)
-            if ext in supported_exts:
-                dest = tmp / f"m0{ext}"
-                with opener(path, "rb") as src:
-                    ok = _copy_capped(src, dest)
-                if ok:
-                    out.append((inner, dest))
-                else:
-                    logger.warning("compressed file too large, skipping: %s", path.name)
+            with opener(path, "rb") as src:
+                _accept(inner, src, tmp, supported_exts, out, state, path.name)
         yield out
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

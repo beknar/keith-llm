@@ -59,6 +59,7 @@ end-to-end and a model small enough to train on one RTX 4090.
   `tiny-1m` preset never need a GPU)
 - Training: an NVIDIA CUDA GPU (developed against an RTX 4090, 24 GB)
 - Export/serving: llama.cpp (for quantization) and/or ollama
+- Optional (scanned PDFs): the `ocr` extra plus the system `tesseract` binary
 
 ## Getting started
 

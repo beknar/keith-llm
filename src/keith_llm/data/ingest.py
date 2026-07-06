@@ -17,10 +17,10 @@ TEXT_EXTS = {".txt", ".md", ".markdown"}
 SUPPORTED_EXTS = TEXT_EXTS | {".pdf"}
 
 
-def extract_pages(path: Path) -> list[str]:
+def extract_pages(path: Path, enable_ocr: bool = True) -> list[str]:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        return extract_pdf_pages(str(path))
+        return extract_pdf_pages(str(path), enable_ocr=enable_ocr)
     if suffix in TEXT_EXTS:
         return [path.read_text(encoding="utf-8", errors="replace")]
     raise ValueError(f"unsupported file type: {path}")

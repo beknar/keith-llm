@@ -36,6 +36,20 @@ keith-llm ingest              # -> data/processed/corpus.jsonl
 
 PDFs are extracted column-aware via pdfplumber (with a pypdf fallback), which
 fixes the multi-column reading-order corruption on rulebooks and modules.
+**Scanned / image-only PDFs** (no text layer) are recovered with OCR when the
+`ocr` extra and Tesseract are installed — otherwise they're dropped as low
+quality. Enable it once on the training host:
+
+```bash
+sudo apt-get install -y tesseract-ocr        # system OCR engine
+pip install -e ".[ocr]"                       # pypdfium2 (render) + pytesseract
+```
+
+Then `keith-llm ingest` OCRs only the image-only pages automatically (pages
+with real text are untouched, so it's cheap on normal PDFs). OCR is slow on
+fully-scanned books (~1-2 s/page); pass `keith-llm ingest --no-ocr` to skip it
+for a quick run.
+
 Audit extraction quality before tokenizing — this scores each document and
 lists the worst offenders (usually bad PDFs) so you can fix or drop them:
 

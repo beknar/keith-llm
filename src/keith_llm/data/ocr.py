@@ -60,12 +60,22 @@ def ocr_pdf_pages(
         for i in sorted(set(page_indices)):
             if not (0 <= i < n_pages):
                 continue
+            page = bitmap = None
             try:
                 page = pdf[i]
-                image = page.render(scale=scale).to_pil()
-                out[i] = pytesseract.image_to_string(image, lang=lang)
+                # to_pil() shares the bitmap's buffer, so the bitmap must stay
+                # alive until Tesseract has read the image; close both after.
+                bitmap = page.render(scale=scale)
+                out[i] = pytesseract.image_to_string(bitmap.to_pil(), lang=lang)
             except Exception as exc:  # noqa: BLE001 - one bad page must not kill the doc
                 logger.warning("OCR failed on page %d of %s: %s", i, path, exc)
+            finally:
+                for resource in (bitmap, page):
+                    try:
+                        if resource is not None:
+                            resource.close()
+                    except Exception:  # noqa: BLE001 - best-effort native cleanup
+                        pass
     finally:
         pdf.close()
     return out

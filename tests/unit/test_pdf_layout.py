@@ -143,9 +143,13 @@ def test_extract_pdf_pages_falls_back_on_parse_error(tmp_path, monkeypatch):
     from keith_llm.data import pdf_layout
 
     monkeypatch.setattr(
-        pdf_layout, "_pdfplumber_pages", lambda p: (_ for _ in ()).throw(ValueError("boom"))
+        pdf_layout,
+        "_pdfplumber_pages",
+        lambda p, mp=None: (_ for _ in ()).throw(ValueError("boom")),
     )
     called = {}
-    monkeypatch.setattr(pdf_layout, "_pypdf_pages", lambda p: called.setdefault("hit", ["ok"]))
+    monkeypatch.setattr(
+        pdf_layout, "_pypdf_pages", lambda p, mp=None: called.setdefault("hit", ["ok"])
+    )
     assert pdf_layout.extract_pdf_pages("whatever.pdf") == ["ok"]
     assert called["hit"] == ["ok"]

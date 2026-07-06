@@ -155,19 +155,21 @@ def order_page_words(words: list[Word], page_width: float | None = None) -> str:
     return "\n".join(_group_lines(bucket) for bucket in buckets if bucket)
 
 
-def _pypdf_pages(path: str) -> list[str]:
+def _pypdf_pages(path: str, max_pages: int | None = None) -> list[str]:
     from pypdf import PdfReader
 
     reader = PdfReader(path)
-    return [(page.extract_text() or "") for page in reader.pages]
+    pages = reader.pages if max_pages is None else reader.pages[:max_pages]
+    return [(page.extract_text() or "") for page in pages]
 
 
-def _pdfplumber_pages(path: str) -> list[str]:
+def _pdfplumber_pages(path: str, max_pages: int | None = None) -> list[str]:
     import pdfplumber
 
     pages: list[str] = []
     with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
+        src_pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
+        for page in src_pages:
             words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
             pages.append(order_page_words(words, page_width=page.width))
     return pages
@@ -208,28 +210,32 @@ def _ocr_fill(path: str, pages: list[str]) -> list[str]:
     return pages
 
 
-def extract_pdf_pages(path: str, enable_ocr: bool = True) -> list[str]:
+def extract_pdf_pages(
+    path: str, enable_ocr: bool = True, max_pages: int | None = None
+) -> list[str]:
     """Extract a PDF as one string per page, column-aware where possible.
 
     Uses pdfplumber for geometry-aware ordering, falling back to pypdf if
     pdfplumber is missing or errors. Image-only pages (scans) are then recovered
     with OCR when it is available (``enable_ocr`` and the ``ocr`` extra); without
     OCR they stay empty and the document is dropped downstream as before.
+    ``max_pages`` limits extraction to the first N pages (used for cheap
+    sampling, e.g. document classification, so a whole scan isn't OCR'd).
     """
     try:
         import pdfplumber  # noqa: F401
 
-        pages = _pdfplumber_pages(path)
+        pages = _pdfplumber_pages(path, max_pages)
     except ImportError:
         logger.info("pdfplumber not installed; using pypdf for %s", path)
-        pages = _pypdf_pages(path)
+        pages = _pypdf_pages(path, max_pages)
     except Exception as exc:  # noqa: BLE001 - any parse failure should degrade, not crash
         logger.warning("pdfplumber failed on %s (%s); falling back to pypdf", path, exc)
-        pages = _pypdf_pages(path)
+        pages = _pypdf_pages(path, max_pages)
 
     # If geometry extraction yielded nothing, a pypdf retry occasionally helps.
     if not any(p.strip() for p in pages):
-        alt = _pypdf_pages(path)
+        alt = _pypdf_pages(path, max_pages)
         if any(p.strip() for p in alt):
             pages = alt
 

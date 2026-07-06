@@ -31,6 +31,12 @@ scripts/fetch_seed_data.sh    # SRD 5.1 + OpenD6 into data/seed/
 # entries to data/sources.yaml. Archives (.zip, .tar[.gz/.bz2/.xz], .tgz) and
 # single-file .gz/.bz2/.xz are expanded automatically; their contained
 # .pdf/.txt/.md files are ingested. Unsupported files are logged and skipped.
+#
+# Have a pile of UNSORTED files? Let classify propose a doc type per file and
+# sort them for you (it asks before moving; low-confidence files are left for
+# you to sort by hand):
+keith-llm classify --src data/raw/dnd5e/_inbox --system dnd5e   # review, confirm, done
+
 keith-llm ingest              # -> data/processed/corpus.jsonl
 ```
 

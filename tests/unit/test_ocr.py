@@ -72,8 +72,8 @@ def test_extract_pdf_pages_end_to_end_ocr(monkeypatch, make_pdf, tmp_path):
     # A real (text) PDF whose page pdfplumber reads as empty gets OCR-filled.
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(make_pdf(["placeholder"]))
-    monkeypatch.setattr(pdf_layout, "_pdfplumber_pages", lambda p: [""])
-    monkeypatch.setattr(pdf_layout, "_pypdf_pages", lambda p: [""])
+    monkeypatch.setattr(pdf_layout, "_pdfplumber_pages", lambda p, mp=None: [""])
+    monkeypatch.setattr(pdf_layout, "_pypdf_pages", lambda p, mp=None: [""])
     monkeypatch.setattr(ocr, "ocr_available", lambda: True)
     monkeypatch.setattr(ocr, "ocr_pdf_pages", lambda p, idx, **k: {0: "scanned content recovered"})
     assert pdf_layout.extract_pdf_pages(str(pdf)) == ["scanned content recovered"]
@@ -82,8 +82,8 @@ def test_extract_pdf_pages_end_to_end_ocr(monkeypatch, make_pdf, tmp_path):
 def test_extract_pdf_pages_ocr_disabled(monkeypatch, make_pdf, tmp_path):
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(make_pdf(["placeholder"]))
-    monkeypatch.setattr(pdf_layout, "_pdfplumber_pages", lambda p: [""])
-    monkeypatch.setattr(pdf_layout, "_pypdf_pages", lambda p: [""])
+    monkeypatch.setattr(pdf_layout, "_pdfplumber_pages", lambda p, mp=None: [""])
+    monkeypatch.setattr(pdf_layout, "_pypdf_pages", lambda p, mp=None: [""])
     monkeypatch.setattr(ocr, "ocr_available", lambda: True)
     monkeypatch.setattr(
         ocr, "ocr_pdf_pages", lambda *a, **k: (_ for _ in ()).throw(AssertionError("disabled"))

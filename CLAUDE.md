@@ -20,7 +20,7 @@ data/sources.yaml   corpus manifest (globs → system/doc_type/license/publishab
 src/keith_llm/
   config.py         ModelConfig/TrainConfig dataclasses + YAML loader
   cli.py            `keith-llm` subcommand dispatcher (lazy imports)
-  data/             ingest (pdf/md/txt), clean, dedup, corpus, binarize → uint16 memmap bins
+  data/             ingest (pdf/md/txt, archive-aware), clean, dedup, corpus, binarize → uint16 memmap bins
   tokenizer/        byte-level BPE training + KeithTokenizer wrapper (control tokens)
   model.py          single-file Llama-style transformer (RoPE/RMSNorm/SwiGLU, KV cache)
   generate.py       sampling: temperature/top-k/top-p/repetition-penalty

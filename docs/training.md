@@ -28,7 +28,9 @@ cd /genai/keith-llm && source .venv/bin/activate
 git pull                      # code arrives via git, never rsync
 scripts/fetch_seed_data.sh    # SRD 5.1 + OpenD6 into data/seed/
 # drop your own books under data/raw/<system>/<doc_type>/ and add matching
-# entries to data/sources.yaml
+# entries to data/sources.yaml. Archives (.zip, .tar[.gz/.bz2/.xz], .tgz) and
+# single-file .gz/.bz2/.xz are expanded automatically; their contained
+# .pdf/.txt/.md files are ingested. Unsupported files are logged and skipped.
 keith-llm ingest              # -> data/processed/corpus.jsonl
 ```
 

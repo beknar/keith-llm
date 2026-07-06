@@ -22,6 +22,30 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_audit_corpus(args: argparse.Namespace) -> int:
+    from keith_llm.data.audit import audit_corpus
+
+    report = audit_corpus(args.corpus)
+    if args.out:
+        from pathlib import Path
+
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(json.dumps(report, indent=2) + "\n")
+
+    print(f"documents: {report['n_documents']}  verdicts: {report['verdicts']}")
+    worst = [d for d in report["documents"] if d["verdict"] != "OK"][: args.top]
+    if worst:
+        print(f"\n{'verdict':<5} {'wordlike':>8} {'intCaps':>8} {'w/line':>7} {'alpha':>6}  source")
+        for d in worst:
+            print(
+                f"{d['verdict']:<5} {d['wordlike_frac']:>8.2f} {d['internal_caps_rate']:>8.2f} "
+                f"{d['words_per_line']:>7.1f} {d['alpha_ratio']:>6.2f}  {d['source']}"
+            )
+    else:
+        print("all documents look clean")
+    return 0
+
+
 def _cmd_fetch_5etools(args: argparse.Namespace) -> int:
     from keith_llm.data.fivetools import fetch_all
 
@@ -151,6 +175,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default="data/processed/corpus.jsonl")
     p.add_argument("--root", default=".", help="directory manifest globs are relative to")
     p.set_defaults(func=_cmd_ingest)
+
+    p = sub.add_parser(
+        "audit-corpus",
+        help="score corpus.jsonl documents for PDF-extraction quality problems",
+    )
+    p.add_argument("--corpus", default="data/processed/corpus.jsonl")
+    p.add_argument("--out", default=None, help="write the full JSON report here")
+    p.add_argument("--top", type=int, default=25, help="how many worst docs to print")
+    p.set_defaults(func=_cmd_audit_corpus)
 
     p = sub.add_parser(
         "fetch-5etools",

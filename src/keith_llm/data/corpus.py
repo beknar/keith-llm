@@ -59,23 +59,58 @@ def build_corpus(
     out_path: str | Path,
     root: str | Path = ".",
     enable_ocr: bool = True,
+    use_cache: bool = True,
+    cache_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run the full pipeline (extract -> clean -> quality filter -> dedup) and
     write ``out_path`` as JSONL. Returns summary stats. ``enable_ocr`` OCRs
-    image-only PDF pages when the ``ocr`` extra is installed."""
+    image-only PDF pages when the ``ocr`` extra is installed. ``use_cache``
+    serves unchanged files' cleaned text from a content-addressed cache so
+    re-ingest skips re-extraction/OCR."""
+    from keith_llm.data.extract_cache import ExtractionCache, current_version, hash_file
+    from keith_llm.data.ocr import ocr_available
+
     root = Path(root)
     specs = load_manifest(manifest_path)
     records: list[dict[str, Any]] = []
-    counters = {"files_scanned": 0, "dropped_low_quality": 0}
+    counters = {"files_scanned": 0, "dropped_low_quality": 0, "cache_hits": 0}
+
+    cache: ExtractionCache | None = None
+    if use_cache:
+        if cache_path is None:
+            cache_path = root / "data" / "cache" / "extraction.sqlite"
+        try:
+            applied_ocr = enable_ocr and ocr_available()
+            cache = ExtractionCache(cache_path, current_version(applied_ocr))
+        except Exception as exc:  # noqa: BLE001 - a bad cache must not block ingestion
+            logger.warning("extraction cache unavailable (%s); proceeding without it", exc)
+            cache = None
 
     def ingest_unit(source: str, filepath: Path, spec: SourceSpec) -> None:
         counters["files_scanned"] += 1
-        try:
-            pages = extract_pages(filepath, enable_ocr=enable_ocr)
-        except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
-            logger.warning("skipping %s: %s", source, exc)
-            return
-        text = clean_text(clean_pages(pages))
+        content_hash = None
+        text = None
+        if cache is not None:
+            try:
+                content_hash = hash_file(filepath)
+                text = cache.get(content_hash)
+            except Exception as exc:  # noqa: BLE001 - cache miss/failure -> extract normally
+                logger.warning("cache read failed for %s: %s", source, exc)
+                content_hash = None
+        if text is not None:
+            counters["cache_hits"] += 1
+        else:
+            try:
+                pages = extract_pages(filepath, enable_ocr=enable_ocr)
+            except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
+                logger.warning("skipping %s: %s", source, exc)
+                return
+            text = clean_text(clean_pages(pages))
+            if cache is not None and content_hash is not None:
+                try:
+                    cache.put(content_hash, text)
+                except Exception as exc:  # noqa: BLE001 - failing to cache is not fatal
+                    logger.warning("cache write failed for %s: %s", source, exc)
         if not is_quality(text):
             counters["dropped_low_quality"] += 1
             logger.info("low quality, skipping: %s", source)
@@ -114,6 +149,9 @@ def build_corpus(
                 skipped_unsupported += 1
                 logger.warning("skipping unsupported file type: %s", rel)
 
+    if cache is not None:
+        cache.close()
+
     n_extracted = len(records)
     records = exact_dedup(records)
     n_after_exact = len(records)
@@ -131,6 +169,7 @@ def build_corpus(
 
     stats = {
         "files_scanned": counters["files_scanned"],
+        "cache_hits": counters["cache_hits"],
         "archives_expanded": archives_expanded,
         "skipped_unsupported": skipped_unsupported,
         "dropped_low_quality": counters["dropped_low_quality"],

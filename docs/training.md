@@ -56,6 +56,13 @@ with real text are untouched, so it's cheap on normal PDFs). OCR is slow on
 fully-scanned books (~1-2 s/page); pass `keith-llm ingest --no-ocr` to skip it
 for a quick run.
 
+Extracted text is cached (content-addressed, in `data/cache/extraction.sqlite`),
+so re-ingesting after adding a few files **skips re-extraction/OCR of every
+unchanged file** — the second run is near-instant. The `cache_hits` stat shows
+how many were served from cache. Use `--no-cache` to force a full re-extract;
+delete `data/cache/` to reset it (it also rebuilds automatically if the
+extraction logic or OCR availability changes).
+
 Audit extraction quality before tokenizing — this scores each document and
 lists the worst offenders (usually bad PDFs) so you can fix or drop them:
 

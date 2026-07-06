@@ -93,10 +93,13 @@ def build_corpus(
         if cache is not None:
             try:
                 content_hash = hash_file(filepath)
-                text = cache.get(content_hash)
-            except Exception as exc:  # noqa: BLE001 - cache miss/failure -> extract normally
-                logger.warning("cache read failed for %s: %s", source, exc)
-                content_hash = None
+            except Exception as exc:  # noqa: BLE001 - unhashable file -> extract, don't cache
+                logger.warning("cache hash failed for %s: %s", source, exc)
+            if content_hash is not None:
+                try:
+                    text = cache.get(content_hash)
+                except Exception as exc:  # noqa: BLE001 - read failure -> extract; put still works
+                    logger.warning("cache read failed for %s: %s", source, exc)
         if text is not None:
             counters["cache_hits"] += 1
         else:
@@ -128,29 +131,30 @@ def build_corpus(
 
     archives_expanded = 0
     skipped_unsupported = 0
-    for spec in specs:
-        for path in sorted(root.glob(spec.glob)):
-            if not path.is_file():
-                continue
-            rel = str(path.relative_to(root))
-            if path.suffix.lower() in SUPPORTED_EXTS:
-                ingest_unit(rel, path, spec)
-            elif is_archive(path):
-                archives_expanded += 1
-                try:
-                    with extracted_documents(path, SUPPORTED_EXTS) as members:
-                        if not members:
-                            logger.info("archive contained no ingestible files: %s", rel)
-                        for name, mpath in members:
-                            ingest_unit(f"{rel}!{name}", mpath, spec)
-                except Exception as exc:  # noqa: BLE001 - a bad archive must not kill the run
-                    logger.warning("skipping unreadable archive %s: %s", rel, exc)
-            else:
-                skipped_unsupported += 1
-                logger.warning("skipping unsupported file type: %s", rel)
-
-    if cache is not None:
-        cache.close()
+    try:
+        for spec in specs:
+            for path in sorted(root.glob(spec.glob)):
+                if not path.is_file():
+                    continue
+                rel = str(path.relative_to(root))
+                if path.suffix.lower() in SUPPORTED_EXTS:
+                    ingest_unit(rel, path, spec)
+                elif is_archive(path):
+                    archives_expanded += 1
+                    try:
+                        with extracted_documents(path, SUPPORTED_EXTS) as members:
+                            if not members:
+                                logger.info("archive contained no ingestible files: %s", rel)
+                            for name, mpath in members:
+                                ingest_unit(f"{rel}!{name}", mpath, spec)
+                    except Exception as exc:  # noqa: BLE001 - a bad archive must not kill the run
+                        logger.warning("skipping unreadable archive %s: %s", rel, exc)
+                else:
+                    skipped_unsupported += 1
+                    logger.warning("skipping unsupported file type: %s", rel)
+    finally:
+        if cache is not None:
+            cache.close()
 
     n_extracted = len(records)
     records = exact_dedup(records)

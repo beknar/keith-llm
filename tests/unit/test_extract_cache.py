@@ -1,3 +1,4 @@
+from keith_llm.data import extract_cache
 from keith_llm.data.extract_cache import (
     ExtractionCache,
     current_version,
@@ -53,3 +54,27 @@ def test_version_isolates_entries(tmp_path):
 
 def test_current_version_distinct():
     assert current_version(True) != current_version(False)
+
+
+def test_current_version_includes_tool_versions():
+    v = current_version(False)
+    assert "pypdf=" in v and "pdfplumber=" in v
+
+
+def test_tool_upgrade_invalidates_cache(tmp_path, monkeypatch):
+    # A file cached under one pdfplumber version must miss after an "upgrade",
+    # so a changed extractor can't serve stale text.
+    path = tmp_path / "c.sqlite"
+    monkeypatch.setattr(
+        extract_cache, "_dep_version", lambda name: "1.0" if name == "pdfplumber" else "x"
+    )
+    c1 = ExtractionCache(path, current_version(False))
+    c1.put("h", "old-extractor text")
+    c1.close()
+
+    monkeypatch.setattr(
+        extract_cache, "_dep_version", lambda name: "2.0" if name == "pdfplumber" else "x"
+    )
+    c2 = ExtractionCache(path, current_version(False))
+    assert c2.get("h") is None  # extractor upgraded -> cache miss -> re-extract
+    c2.close()

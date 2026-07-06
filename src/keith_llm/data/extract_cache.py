@@ -7,11 +7,15 @@ version, so on re-ingest an unchanged file is served from the cache instead of
 being extracted again. Content addressing means the cache also survives file
 renames/moves and shares one entry across byte-identical copies.
 
-The version tag encodes both the extraction/cleaning logic (``EXTRACT_VERSION``,
-bump it when that changes) and whether OCR was applied, so installing Tesseract
-— or changing the pipeline — correctly invalidates stale entries. ``(hash,
-version)`` is the primary key, so with-OCR and without-OCR (`--no-ocr`)
-extractions of the same file coexist rather than clobbering each other.
+The version tag captures everything that changes a file's extracted text
+besides its bytes: this repo's extraction/cleaning logic (``EXTRACT_VERSION``,
+bump it when that changes), whether OCR was applied, and the installed versions
+of the extraction/OCR tools (pypdf, pdfplumber, pytesseract, and the Tesseract
+engine). So upgrading — not just installing — any of those automatically
+invalidates stale entries; no manual discipline beyond bumping
+``EXTRACT_VERSION`` for in-repo changes. ``(hash, version)`` is the primary key,
+so with-OCR and without-OCR (`--no-ocr`) extractions of the same file coexist
+rather than clobbering each other.
 """
 
 from __future__ import annotations
@@ -19,6 +23,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import sqlite3
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -27,8 +33,32 @@ logger = logging.getLogger(__name__)
 EXTRACT_VERSION = "1"
 
 
+def _dep_version(name: str) -> str:
+    try:
+        return _pkg_version(name)
+    except PackageNotFoundError:
+        return "none"
+
+
 def current_version(applied_ocr: bool) -> str:
-    return f"{EXTRACT_VERSION}:ocr={int(applied_ocr)}"
+    """A cache key component that changes whenever extraction output could —
+    repo logic, OCR-applied flag, and the versions of the extraction/OCR tools."""
+    parts = [
+        EXTRACT_VERSION,
+        f"pypdf={_dep_version('pypdf')}",
+        f"pdfplumber={_dep_version('pdfplumber')}",
+        f"ocr={int(applied_ocr)}",
+    ]
+    if applied_ocr:
+        parts.append(f"pypdfium2={_dep_version('pypdfium2')}")
+        parts.append(f"pytesseract={_dep_version('pytesseract')}")
+        try:
+            import pytesseract
+
+            parts.append(f"tesseract={pytesseract.get_tesseract_version()}")
+        except Exception:  # noqa: BLE001 - engine version is best-effort
+            parts.append("tesseract=?")
+    return "|".join(parts)
 
 
 def hash_file(path: str | Path, chunk: int = 1 << 20) -> str:

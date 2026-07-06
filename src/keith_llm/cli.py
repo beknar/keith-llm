@@ -46,6 +46,47 @@ def _cmd_audit_corpus(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_dedup_report(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from keith_llm.data.dedup_report import apply_removals, report_corpus
+
+    report = report_corpus(args.corpus, threshold=args.threshold)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(json.dumps(report, indent=2) + "\n")
+
+    print(
+        f"documents: {report['n_documents']}  duplicate clusters: {report['n_clusters']}  "
+        f"files flagged: {report['n_drop_files']}  (overlap >= {args.threshold:.0%})"
+    )
+    for c in report["clusters"]:
+        k = c["keep"]
+        print(f"\nKEEP  {k['source']}  [{k['verdict']}, {k['n_chars']} chars]")
+        for d in c["drop"]:
+            print(
+                f"  DROP  {d['source']}  overlap={d['overlap_with_keep']:.0%}  "
+                f"[{d['verdict']}, {d['n_chars']} chars]"
+            )
+
+    if not report["drop_files"]:
+        print("\nno duplicates above threshold")
+        return 0
+    if args.apply:
+        res = apply_removals(report["drop_files"], root=args.root, hard=args.hard)
+        where = "deleted" if args.hard else f"quarantined under {res['quarantine']}"
+        print(f"\n{len(res['removed'])} files {where}.")
+        if res["missing"]:
+            print(f"  {len(res['missing'])} already gone: {res['missing'][:3]}")
+        print("Re-run 'keith-llm ingest' to rebuild the corpus without them.")
+    else:
+        print(
+            f"\n(dry run) {report['n_drop_files']} files would be removed. "
+            "Re-run with --apply to quarantine them (reversible), or --apply --hard to delete."
+        )
+    return 0
+
+
 def _cmd_fetch_5etools(args: argparse.Namespace) -> int:
     from keith_llm.data.fivetools import fetch_all
 
@@ -184,6 +225,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default=None, help="write the full JSON report here")
     p.add_argument("--top", type=int, default=25, help="how many worst docs to print")
     p.set_defaults(func=_cmd_audit_corpus)
+
+    p = sub.add_parser(
+        "dedup-report",
+        help="report (and optionally remove) documents that overlap another source",
+    )
+    p.add_argument("--corpus", default="data/processed/corpus.jsonl")
+    p.add_argument("--threshold", type=float, default=0.75, help="overlap coefficient cutoff")
+    p.add_argument("--out", default=None, help="write the full JSON report here")
+    p.add_argument("--root", default=".", help="base dir the corpus 'source' paths are relative to")
+    p.add_argument("--apply", action="store_true", help="remove the flagged source files")
+    p.add_argument(
+        "--hard", action="store_true", help="with --apply, delete permanently instead of quarantine"
+    )
+    p.set_defaults(func=_cmd_dedup_report)
 
     p = sub.add_parser(
         "fetch-5etools",

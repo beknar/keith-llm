@@ -47,6 +47,22 @@ Then eyeball a few flagged docs: `jq -r '.documents[] | select(.verdict!="OK")
 | .source' data/processed/audit.json` and read them with
 `shuf -n 3 data/processed/corpus.jsonl | jq -r .text | less`.
 
+Check for the same content ingested from two sources (e.g. an adventure present
+as both a 5etools text render and a PDF). This measures overlap by containment,
+so it catches duplicates even when the two copies differ in size/format:
+
+```bash
+keith-llm dedup-report --out data/processed/dedup.json   # dry run: lists KEEP/DROP per cluster
+# apply (keeps the cleaner copy, quarantines the rest to data/quarantine/):
+keith-llm dedup-report --apply
+# or delete permanently instead of quarantining:
+keith-llm dedup-report --apply --hard
+```
+
+`--apply` removes the flagged **source files**, so re-run `keith-llm ingest`
+afterward to rebuild the corpus without them. Quarantined files can be restored
+from `data/quarantine/` (delete that directory to make removal permanent).
+
 ```bash
 keith-llm train-tokenizer     # -> data/tokenizer/tokenizer.json (vocab 16384)
 keith-llm binarize            # -> data/tokens/{train,val}.bin + meta.json

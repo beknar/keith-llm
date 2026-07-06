@@ -88,8 +88,10 @@ class ClassifyResult:
 def classify_text(text: str) -> tuple[str | None, float, dict[str, float]]:
     """Return (best_doc_type, confidence in [0,1], per-type scores).
 
-    Confidence is the winning type's share of total signal mass — 1.0 means all
-    signal points one way, ~0.33 means a three-way tie, 0.0 means no signal.
+    Confidence is the winner's LEAD over the runner-up as a share of total
+    signal: a dominant type approaches 1.0, a 2-way tie is 0.0, and no signal
+    at all returns (None, 0.0). Measuring the lead (not the winning share) keeps
+    genuinely ambiguous files below threshold so they aren't confidently moved.
     """
     n_words = max(len(text.split()), 1)
     scale = 1000.0 / n_words  # signal rate per 1000 words, so length doesn't bias
@@ -100,8 +102,10 @@ def classify_text(text: str) -> tuple[str | None, float, dict[str, float]]:
     total = sum(scores.values())
     if total <= 0:
         return None, 0.0, scores
+    ordered = sorted(scores.values(), reverse=True)
     best = max(scores, key=scores.__getitem__)
-    return best, scores[best] / total, scores
+    confidence = (ordered[0] - ordered[1]) / total
+    return best, confidence, scores
 
 
 def _sample_text(path: Path, enable_ocr: bool) -> str | None:
@@ -143,7 +147,11 @@ def classify_paths(
     paths = [src] if src.is_file() else sorted(p for p in src.rglob("*") if p.is_file())
     results = []
     for p in paths:
-        result = classify_file(p, system, dest, enable_ocr, min_confidence)
+        try:
+            result = classify_file(p, system, dest, enable_ocr, min_confidence)
+        except Exception as exc:  # noqa: BLE001 - one unreadable file must not kill the batch
+            logger.warning("could not classify %s: %s", p, exc)
+            continue
         if result is not None:
             results.append(result)
     return results

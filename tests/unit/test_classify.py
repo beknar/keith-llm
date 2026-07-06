@@ -57,6 +57,38 @@ def test_no_signal_is_none_and_zero_confidence():
     assert conf == 0.0
 
 
+def test_two_way_tie_is_low_confidence():
+    # Equal bestiary and adventure signal must NOT be confidently routed:
+    # confidence is the winner's lead over the runner-up, so a tie scores ~0.
+    # bestiary: armor class(3)+challenge(2)=5; adventure: the party(3)+treasure(1)+development(1)=5
+    text = "Armor Class 15. Challenge 5. The party finds treasure. Development follows."
+    _, conf, scores = classify_text(text)
+    top2 = sorted(scores.values(), reverse=True)[:2]
+    assert abs(top2[0] - top2[1]) < 1e-9  # genuinely tied
+    assert conf < 0.45  # -> flagged REVIEW, not moved
+
+
+def test_classify_paths_survives_unreadable_file(tmp_path, monkeypatch):
+    from keith_llm.data import classify as classify_mod
+
+    src = tmp_path / "unsorted"
+    src.mkdir()
+    (src / "good.txt").write_text(BESTIARY)
+    (src / "bad.txt").write_text("whatever")
+
+    real = classify_mod.classify_file
+
+    def flaky(path, *a, **k):
+        if path.name == "bad.txt":
+            raise OSError("simulated unreadable file")
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(classify_mod, "classify_file", flaky)
+    results = classify_paths(src, system="dnd5e", dest=tmp_path / "raw")
+    # the bad file is skipped, the good one still classified
+    assert [Path(r.path).name for r in results] == ["good.txt"]
+
+
 def test_classify_file_txt(tmp_path):
     f = tmp_path / "monsters.txt"
     f.write_text(BESTIARY)

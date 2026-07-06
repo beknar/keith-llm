@@ -69,6 +69,8 @@ def _cmd_classify(args: argparse.Namespace) -> int:
         return 0
     res = apply_moves(confident)
     print(f"\nmoved {len(res['moved'])} files; skipped {len(res['skipped'])} (target existed).")
+    for p in res["skipped"]:
+        print(f"  skipped (name already at target): {p}")
     print("Re-run 'keith-llm ingest' to pick them up with their new doc types.")
     if review:
         print(f"{len(review)} low-confidence files left in place for manual review.")

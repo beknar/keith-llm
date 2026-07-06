@@ -77,22 +77,6 @@ def find_overlaps(
     return pairs, sizes, dict(shared)
 
 
-class _UnionFind:
-    def __init__(self, n: int):
-        self.parent = list(range(n))
-
-    def find(self, x: int) -> int:
-        while self.parent[x] != x:
-            self.parent[x] = self.parent[self.parent[x]]
-            x = self.parent[x]
-        return x
-
-    def union(self, a: int, b: int) -> None:
-        ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self.parent[rb] = ra
-
-
 def _keep_key(rec: Record) -> tuple:
     """Higher sorts as the one to KEEP: better extraction, non-PDF, longer,
     then a deterministic path tiebreak."""
@@ -107,16 +91,6 @@ def _keep_key(rec: Record) -> tuple:
     )
 
 
-def _cluster(n: int, pairs: list[tuple[int, int, float, float]]) -> list[list[int]]:
-    uf = _UnionFind(n)
-    for i, j, _, _ in pairs:
-        uf.union(i, j)
-    groups: dict[int, list[int]] = defaultdict(list)
-    for i in {x for p in pairs for x in p[:2]}:
-        groups[uf.find(i)].append(i)
-    return [sorted(members) for members in groups.values()]
-
-
 def _doc_summary(rec: Record, size: int) -> dict[str, Any]:
     return {
         "source": rec.get("source"),
@@ -129,28 +103,36 @@ def _doc_summary(rec: Record, size: int) -> dict[str, Any]:
 
 
 def build_report(records: list[Record], threshold: float = 0.75) -> dict[str, Any]:
-    """Group overlapping documents into clusters, choose one to keep per
-    cluster, and list the rest as removal candidates. Non-destructive."""
-    pairs, sizes, shared = find_overlaps(records, threshold)
+    """Greedily keep the best copy of each duplicate group and list the rest as
+    removal candidates. Best-first: a document is only dropped when it overlaps
+    an already-KEPT document by >= threshold, so nothing is deleted merely for
+    resembling another doc that was itself dropped. Non-destructive."""
+    pairs, sizes, _ = find_overlaps(records, threshold)
+    neighbors: dict[int, dict[int, float]] = defaultdict(dict)
+    for i, j, overlap, _ in pairs:
+        neighbors[i][j] = overlap
+        neighbors[j][i] = overlap
+
+    order = sorted(range(len(records)), key=lambda i: _keep_key(records[i]), reverse=True)
+    removed: set[int] = set()
     clusters_out: list[dict[str, Any]] = []
     drop_files: list[str] = []
 
-    for members in _cluster(len(records), pairs):
-        keep = max(members, key=lambda i: _keep_key(records[i]))
+    for keep in order:
+        if keep in removed:
+            continue
         drops = []
-        for i in members:
-            if i == keep:
+        for other, overlap in sorted(neighbors[keep].items(), key=lambda kv: kv[1], reverse=True):
+            if other in removed:
                 continue
-            lo, hi = (i, keep) if i < keep else (keep, i)
-            inter = shared.get((lo, hi), 0)
-            m = min(sizes[i], sizes[keep])
-            summary = _doc_summary(records[i], sizes[i])
-            summary["overlap_with_keep"] = round(inter / m, 4) if m else 0.0
+            removed.add(other)
+            summary = _doc_summary(records[other], sizes[other])
+            summary["overlap_with_keep"] = round(overlap, 4)
             drops.append(summary)
-            if records[i].get("source"):
-                drop_files.append(records[i]["source"])
-        drops.sort(key=lambda d: d["overlap_with_keep"], reverse=True)
-        clusters_out.append({"keep": _doc_summary(records[keep], sizes[keep]), "drop": drops})
+            if records[other].get("source"):
+                drop_files.append(records[other]["source"])
+        if drops:
+            clusters_out.append({"keep": _doc_summary(records[keep], sizes[keep]), "drop": drops})
 
     clusters_out.sort(
         key=lambda c: max((d["overlap_with_keep"] for d in c["drop"]), default=0.0),

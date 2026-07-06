@@ -92,8 +92,15 @@ def score_text(text: str) -> dict[str, Any]:
     n_cores = len(cores)
     wordlike = sum(1 for c in cores if len(c) <= 20 and _VOWEL.search(c))
     internal_caps = sum(1 for c in cores if _INTERNAL_CAPS.search(c))
-    wordlike_frac = wordlike / n_cores if n_cores else 1.0
-    internal_caps_rate = internal_caps / n_cores if n_cores else 0.0
+    if n_cores:
+        wordlike_frac = wordlike / n_cores
+        internal_caps_rate = internal_caps / n_cores
+    else:
+        # No length>=2 alphabetic words at all. Healthy only if the document is
+        # genuinely empty; if it has tokens but none form words, the text layer
+        # is shredded (letter-spacing / per-glyph positioning) — flag as failure.
+        wordlike_frac = 1.0 if n_tokens == 0 else 0.0
+        internal_caps_rate = 0.0
 
     long_tokens = sum(1 for t in tokens if len(t) > 30)
     long_token_frac = long_tokens / n_tokens if n_tokens else 0.0
@@ -108,18 +115,21 @@ def score_text(text: str) -> dict[str, Any]:
     garbage_line_frac = garbage_lines / len(lines) if lines else 0.0
     words_per_line = n_tokens / len(lines) if lines else float(n_tokens)
 
-    metrics = {
+    # Verdict is computed from raw values; rounding is display-only and applied
+    # afterward so a value just under a threshold can't round past it.
+    raw = {
         "n_chars": len(text),
         "n_tokens": n_tokens,
-        "alpha_ratio": round(alpha_ratio, 4),
-        "wordlike_frac": round(wordlike_frac, 4),
-        "internal_caps_rate": round(internal_caps_rate, 4),
-        "long_token_frac": round(long_token_frac, 4),
-        "mean_word_len": round(mean_word_len, 2),
-        "garbage_line_frac": round(garbage_line_frac, 4),
-        "words_per_line": round(words_per_line, 2),
+        "alpha_ratio": alpha_ratio,
+        "wordlike_frac": wordlike_frac,
+        "internal_caps_rate": internal_caps_rate,
+        "long_token_frac": long_token_frac,
+        "mean_word_len": mean_word_len,
+        "garbage_line_frac": garbage_line_frac,
+        "words_per_line": words_per_line,
     }
-    metrics["verdict"] = _verdict(metrics)
+    metrics = {k: (round(v, 4) if isinstance(v, float) else v) for k, v in raw.items()}
+    metrics["verdict"] = _verdict(raw)
     return metrics
 
 

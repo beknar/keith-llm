@@ -59,6 +59,14 @@ def test_word_salad_flagged_despite_intact_words():
     assert m["verdict"] == "BAD"
 
 
+def test_letter_spaced_extraction_is_bad():
+    # Per-glyph positioning that pdfplumber splits into single characters: many
+    # tokens, but none form a length>=2 word. Must not default to a healthy OK.
+    m = score_text("T h e d a m a g e d d o o r s w i n g s o p e n " * 30)
+    assert m["wordlike_frac"] == 0.0
+    assert m["verdict"] == "BAD"
+
+
 def test_statblock_not_flagged_bad():
     # Dense tables/numbers must not be mistaken for a broken extraction.
     assert score_text(STATBLOCK)["verdict"] in ("OK", "WARN")

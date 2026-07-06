@@ -13,6 +13,7 @@ from typing import Any
 import yaml
 
 from keith_llm.constants import DOC_TYPES, SYSTEMS
+from keith_llm.data.archive import extracted_documents, is_archive
 from keith_llm.data.clean import clean_pages, clean_text, is_quality
 from keith_llm.data.dedup import exact_dedup, minhash_dedup, paragraph_dedup
 from keith_llm.data.ingest import SUPPORTED_EXTS, extract_pages
@@ -63,34 +64,53 @@ def build_corpus(
     root = Path(root)
     specs = load_manifest(manifest_path)
     records: list[dict[str, Any]] = []
-    files_scanned = 0
-    dropped_low_quality = 0
+    counters = {"files_scanned": 0, "dropped_low_quality": 0}
 
+    def ingest_unit(source: str, filepath: Path, spec: SourceSpec) -> None:
+        counters["files_scanned"] += 1
+        try:
+            pages = extract_pages(filepath)
+        except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
+            logger.warning("skipping %s: %s", source, exc)
+            return
+        text = clean_text(clean_pages(pages))
+        if not is_quality(text):
+            counters["dropped_low_quality"] += 1
+            logger.info("low quality, skipping: %s", source)
+            return
+        records.append(
+            {
+                "source": source,
+                "system": spec.system,
+                "doc_type": spec.doc_type,
+                "license": spec.license,
+                "publishable": spec.publishable,
+                "text": text,
+            }
+        )
+
+    archives_expanded = 0
+    skipped_unsupported = 0
     for spec in specs:
         for path in sorted(root.glob(spec.glob)):
-            if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTS:
+            if not path.is_file():
                 continue
-            files_scanned += 1
-            try:
-                pages = extract_pages(path)
-            except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
-                logger.warning("skipping %s: %s", path, exc)
-                continue
-            text = clean_text(clean_pages(pages))
-            if not is_quality(text):
-                dropped_low_quality += 1
-                logger.info("low quality, skipping: %s", path)
-                continue
-            records.append(
-                {
-                    "source": str(path.relative_to(root)),
-                    "system": spec.system,
-                    "doc_type": spec.doc_type,
-                    "license": spec.license,
-                    "publishable": spec.publishable,
-                    "text": text,
-                }
-            )
+            rel = str(path.relative_to(root))
+            if path.suffix.lower() in SUPPORTED_EXTS:
+                ingest_unit(rel, path, spec)
+            elif is_archive(path):
+                archives_expanded += 1
+                try:
+                    with extracted_documents(path, SUPPORTED_EXTS) as members:
+                        if not members:
+                            logger.info("archive contained no ingestible files: %s", rel)
+                        for name, mpath in members:
+                            ingest_unit(f"{rel}!{name}", mpath, spec)
+                except Exception as exc:  # noqa: BLE001 - a bad archive must not kill the run
+                    logger.warning("skipping unreadable archive %s: %s", rel, exc)
+            else:
+                skipped_unsupported += 1
+                logger.warning("skipping unsupported file type: %s", rel)
 
     n_extracted = len(records)
     records = exact_dedup(records)
@@ -108,8 +128,10 @@ def build_corpus(
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     stats = {
-        "files_scanned": files_scanned,
-        "dropped_low_quality": dropped_low_quality,
+        "files_scanned": counters["files_scanned"],
+        "archives_expanded": archives_expanded,
+        "skipped_unsupported": skipped_unsupported,
+        "dropped_low_quality": counters["dropped_low_quality"],
         "dropped_exact_dup": n_extracted - n_after_exact,
         "dropped_near_dup": n_after_exact - len(records),
         "documents": len(records),

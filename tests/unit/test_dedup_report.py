@@ -74,6 +74,15 @@ def test_threshold_is_respected():
     assert len(find_overlaps(records, threshold=0.40)[0]) == 1
 
 
+def test_max_doc_frequency_cap_is_tunable():
+    # Four identical docs: their shared shingles appear in all 4. With the cap
+    # below 4 those shingles are skipped (boilerplate assumption) and the dupes
+    # are missed; raising the cap catches them. Documents the exactness caveat.
+    records = [_rec(f"copy{i}.txt", BASE) for i in range(4)]
+    assert find_overlaps(records, threshold=0.75, max_doc_frequency=3)[0] == []
+    assert len(find_overlaps(records, threshold=0.75, max_doc_frequency=10)[0]) == 6  # C(4,2)
+
+
 def test_report_corpus_roundtrip(tmp_path):
     corpus = tmp_path / "corpus.jsonl"
     records = [_rec("keep.txt", BASE), _rec("dupe.pdf", BASE), _rec("unique.txt", EXTRA)]

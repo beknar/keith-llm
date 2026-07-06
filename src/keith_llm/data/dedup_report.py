@@ -9,8 +9,11 @@ It scores pairs by the **overlap coefficient** ``|A∩B| / min(|A|, |B|)`` on
 5-word shingles, not Jaccard. Containment survives large size differences: a
 small stat block fully inside a big book scores ~1.0, whereas its Jaccard —
 and therefore MinHash/LSH — would be small. Intersections are computed exactly
-via an inverted shingle index, so no pair is missed and non-overlapping pairs
-cost nothing.
+via an inverted shingle index, so non-overlapping pairs cost nothing. The one
+exactness caveat: a shingle shared across more than ``max_doc_frequency``
+documents is treated as boilerplate and skipped (and the skip is logged), which
+bounds the pairwise cost but means overlaps among content duplicated across
+that many documents can be undercounted.
 
 The report is non-destructive. Removal acts on the SOURCE FILES (``corpus.jsonl``
 is rebuilt from sources every ingest, so editing it is pointless) and, by
@@ -32,23 +35,31 @@ from keith_llm.data.dedup import Record, shingle_hashes
 
 logger = logging.getLogger(__name__)
 
-# A shingle in more than this many documents is a common phrase / residual
-# boilerplate, not a duplication signal — skipping it also caps the pairwise
-# blow-up a very common shingle would cause.
+# Default cap: a shingle in more than this many documents is a common phrase /
+# residual boilerplate, not a specific-duplicate signal — skipping it also caps
+# the pairwise blow-up a very common shingle would cause. A given adventure/book
+# realistically appears in only a handful of sources, well under this.
 _MAX_DOC_FREQUENCY = 50
 
 _VERDICT_RANK = {"OK": 2, "WARN": 1, "BAD": 0}
 
 
 def find_overlaps(
-    records: list[Record], threshold: float = 0.75, k: int = 5
+    records: list[Record],
+    threshold: float = 0.75,
+    k: int = 5,
+    max_doc_frequency: int = _MAX_DOC_FREQUENCY,
 ) -> tuple[list[tuple[int, int, float, float]], list[int], dict[tuple[int, int], int]]:
     """Return ``(pairs, sizes, shared)``.
 
     ``pairs`` are ``(i, j, overlap, jaccard)`` with ``i < j`` and
     ``overlap >= threshold``, highest overlap first. ``sizes[i]`` is document
     i's distinct-shingle count. ``shared`` maps every co-occurring ``(i, j)``
-    to its exact shared-shingle count (kept for later lookup).
+    to its shared-shingle count.
+
+    Shingles shared across more than ``max_doc_frequency`` documents are treated
+    as boilerplate and skipped (logged) to bound cost; raise it if you expect
+    genuine content duplicated across that many sources.
     """
     sizes: list[int] = []
     postings: dict[int, list[int]] = defaultdict(list)
@@ -59,10 +70,23 @@ def find_overlaps(
             postings[h].append(idx)
 
     shared: dict[tuple[int, int], int] = defaultdict(int)
+    skipped = 0
     for docs in postings.values():
-        if 2 <= len(docs) <= _MAX_DOC_FREQUENCY:
-            for a, b in combinations(sorted(docs), 2):
-                shared[(a, b)] += 1
+        if len(docs) < 2:
+            continue
+        if len(docs) > max_doc_frequency:
+            skipped += 1
+            continue
+        for a, b in combinations(sorted(docs), 2):
+            shared[(a, b)] += 1
+    if skipped:
+        logger.warning(
+            "%d shingles skipped as boilerplate (shared across > %d documents); "
+            "overlaps among that-heavily-duplicated content may be undercounted — "
+            "raise max_doc_frequency to include them",
+            skipped,
+            max_doc_frequency,
+        )
 
     pairs = []
     for (i, j), inter in shared.items():

@@ -21,6 +21,7 @@ corrupts training data — is unaffected.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TypedDict
 
 logger = logging.getLogger(__name__)
@@ -172,23 +173,66 @@ def _pdfplumber_pages(path: str) -> list[str]:
     return pages
 
 
-def extract_pdf_pages(path: str) -> list[str]:
+# A page with fewer than this many non-space characters of extractable text is
+# treated as image-only (a scan) and sent to OCR when it is available.
+_OCR_MIN_CHARS = 32
+
+
+def _nonspace_len(text: str) -> int:
+    return sum(1 for c in text if not c.isspace())
+
+
+def _ocr_fill(path: str, pages: list[str]) -> list[str]:
+    """Replace image-only pages with OCR'd text, if OCR is available."""
+    from keith_llm.data.ocr import ocr_available, ocr_pdf_pages
+
+    if not ocr_available():
+        return pages
+    needed = {i for i, p in enumerate(pages) if _nonspace_len(p) < _OCR_MIN_CHARS}
+    if not needed:
+        return pages
+    logger.info(
+        "OCR: %d/%d pages of %s look image-only; running Tesseract",
+        len(needed),
+        len(pages),
+        Path(path).name,
+    )
+    try:
+        recovered = ocr_pdf_pages(path, needed)
+    except Exception as exc:  # noqa: BLE001 - OCR failure must not kill ingestion
+        logger.warning("OCR failed for %s: %s", path, exc)
+        return pages
+    for i, text in recovered.items():
+        if _nonspace_len(text) > _nonspace_len(pages[i]):
+            pages[i] = text
+    return pages
+
+
+def extract_pdf_pages(path: str, enable_ocr: bool = True) -> list[str]:
     """Extract a PDF as one string per page, column-aware where possible.
 
-    Uses pdfplumber for geometry-aware ordering; falls back to pypdf if
-    pdfplumber is not installed, errors, or yields nothing (e.g. an image-only
-    scan, which neither tool can read without OCR).
+    Uses pdfplumber for geometry-aware ordering, falling back to pypdf if
+    pdfplumber is missing or errors. Image-only pages (scans) are then recovered
+    with OCR when it is available (``enable_ocr`` and the ``ocr`` extra); without
+    OCR they stay empty and the document is dropped downstream as before.
     """
     try:
         import pdfplumber  # noqa: F401
+
+        pages = _pdfplumber_pages(path)
     except ImportError:
         logger.info("pdfplumber not installed; using pypdf for %s", path)
-        return _pypdf_pages(path)
-    try:
-        pages = _pdfplumber_pages(path)
+        pages = _pypdf_pages(path)
     except Exception as exc:  # noqa: BLE001 - any parse failure should degrade, not crash
         logger.warning("pdfplumber failed on %s (%s); falling back to pypdf", path, exc)
-        return _pypdf_pages(path)
+        pages = _pypdf_pages(path)
+
+    # If geometry extraction yielded nothing, a pypdf retry occasionally helps.
     if not any(p.strip() for p in pages):
-        return _pypdf_pages(path)
+        alt = _pypdf_pages(path)
+        if any(p.strip() for p in alt):
+            pages = alt
+
+    if enable_ocr:
+        pages = _ocr_fill(path, pages)
     return pages

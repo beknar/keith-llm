@@ -25,6 +25,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]
+# OCR for scanned/image-only PDFs; also needs the system `tesseract` binary.
+ocr = ["pypdfium2>=4.0", "pytesseract>=0.3.10"]
 
 [project.scripts]
 keith-llm = "keith_llm.cli:main"

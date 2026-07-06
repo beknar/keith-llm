@@ -58,9 +58,11 @@ def build_corpus(
     manifest_path: str | Path,
     out_path: str | Path,
     root: str | Path = ".",
+    enable_ocr: bool = True,
 ) -> dict[str, Any]:
     """Run the full pipeline (extract -> clean -> quality filter -> dedup) and
-    write ``out_path`` as JSONL. Returns summary stats."""
+    write ``out_path`` as JSONL. Returns summary stats. ``enable_ocr`` OCRs
+    image-only PDF pages when the ``ocr`` extra is installed."""
     root = Path(root)
     specs = load_manifest(manifest_path)
     records: list[dict[str, Any]] = []
@@ -69,7 +71,7 @@ def build_corpus(
     def ingest_unit(source: str, filepath: Path, spec: SourceSpec) -> None:
         counters["files_scanned"] += 1
         try:
-            pages = extract_pages(filepath)
+            pages = extract_pages(filepath, enable_ocr=enable_ocr)
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
             logger.warning("skipping %s: %s", source, exc)
             return

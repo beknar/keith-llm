@@ -30,7 +30,7 @@ def tokenize_example(
 ) -> Example | None:
     """Return (input_ids, target_ids) or None if no response survives truncation."""
     prompt_ids = [tok.bos_id] + tok.encode(build_prompt(instruction))
-    response_ids = tok.encode(response) + [tok.eos_id]
+    response_ids = tok.encode(response.strip()) + [tok.eos_id]
     full = (prompt_ids + response_ids)[:max_seq_len]
     if len(full) < 2:
         return None

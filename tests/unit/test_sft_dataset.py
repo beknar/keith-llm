@@ -70,6 +70,20 @@ def test_monster_qa_deterministic():
     assert monster_qa(MON, random.Random(5)) == monster_qa(MON, random.Random(5))
 
 
+def test_monster_qa_survives_malformed_shapes():
+    # Real bestiaries have oddly-shaped entries; the stat-block path (via
+    # render_monster) must not crash on bare-int ac, dict ac, or empty/null size.
+    for bad in (
+        {"name": "A", "ac": 15},  # bare int ac
+        {"name": "B", "ac": {"ac": 12}},  # dict ac (not in a list)
+        {"name": "C", "size": []},  # empty size list
+        {"name": "D", "size": None},  # null size
+        {"name": "E", "alignment": None},  # null alignment
+    ):
+        pairs = monster_qa(bad, random.Random(0))  # must not raise
+        assert all(isinstance(q, str) and isinstance(a, str) for q, a in pairs)
+
+
 # --- packaged seed ---
 
 
@@ -117,6 +131,27 @@ def test_build_deterministic(tmp_path):
     b = build_sft_dataset(tmp_path / "b.jsonl", base_url=mirror, seed=3)
     assert a == b
     assert (tmp_path / "a.jsonl").read_text() == (tmp_path / "b.jsonl").read_text()
+
+
+def test_build_survives_one_bad_monster(tmp_path, monkeypatch):
+    # A monster that makes monster_qa raise must be skipped, not abort the build.
+    from keith_llm.sft import build as build_mod
+
+    data = tmp_path / "data" / "bestiary"
+    data.mkdir(parents=True)
+    (data / "index.json").write_text(json.dumps({"MM": "bestiary-mm.json"}))
+    (data / "bestiary-mm.json").write_text(json.dumps({"monster": [MON, {"name": "Boom"}]}))
+
+    real = build_mod.monster_qa
+
+    def flaky(mon, rng):
+        if mon.get("name") == "Boom":
+            raise ValueError("simulated bad monster")
+        return real(mon, rng)
+
+    monkeypatch.setattr(build_mod, "monster_qa", flaky)
+    stats = build_sft_dataset(tmp_path / "sft.jsonl", base_url=tmp_path.as_uri())
+    assert stats["grounded"] > 0  # MON still produced pairs; Boom was skipped
 
 
 def test_build_missing_mirror_falls_back_to_seed(tmp_path):

@@ -54,7 +54,12 @@ def _bestiary_pairs(
             continue
         count = 0
         for mon in monsters:
-            for instruction, response in monster_qa(mon, rng):
+            try:
+                pairs = monster_qa(mon, rng)
+            except Exception as exc:  # noqa: BLE001 - one malformed monster must not kill the build
+                logger.warning("skipping monster %s: %s", mon.get("name", "?"), exc)
+                continue
+            for instruction, response in pairs:
                 out.append(
                     {
                         "instruction": instruction,

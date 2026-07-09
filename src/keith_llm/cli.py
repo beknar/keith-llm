@@ -148,6 +148,27 @@ def _cmd_dedup_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_sft(args: argparse.Namespace) -> int:
+    from keith_llm.sft.trainer import SFTTrainer
+
+    trainer = SFTTrainer(
+        base_ckpt=args.base,
+        data_jsonl=args.data,
+        tokenizer_path=args.tokenizer,
+        out_dir=args.out_dir,
+        epochs=args.epochs,
+        lr=args.lr,
+        batch_size=args.batch_size,
+        device=args.device,
+    )
+    final_loss = trainer.train()
+    print(
+        f"done: {len(trainer.examples)} examples, {trainer.total_steps} steps, "
+        f"loss {final_loss:.4f} -> {args.out_dir}"
+    )
+    return 0
+
+
 def _cmd_sft_build(args: argparse.Namespace) -> int:
     from keith_llm.sft.build import build_sft_dataset
 
@@ -336,6 +357,17 @@ def main(argv: list[str] | None = None) -> int:
         "--hard", action="store_true", help="with --apply, delete permanently instead of quarantine"
     )
     p.set_defaults(func=_cmd_dedup_report)
+
+    p = sub.add_parser("sft", help="instruction-tune (SFT) a base checkpoint on an SFT dataset")
+    p.add_argument("--base", required=True, help="base checkpoint to fine-tune (latest.pt)")
+    p.add_argument("--data", default="data/sft/sft.jsonl")
+    p.add_argument("--tokenizer", default="data/tokenizer/tokenizer.json")
+    p.add_argument("--out-dir", default="checkpoints/sft")
+    p.add_argument("--epochs", type=int, default=3)
+    p.add_argument("--lr", type=float, default=2e-5)
+    p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--device", default=None)
+    p.set_defaults(func=_cmd_sft)
 
     p = sub.add_parser(
         "sft-build",

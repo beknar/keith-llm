@@ -148,6 +148,19 @@ def _cmd_dedup_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_sft_build(args: argparse.Namespace) -> int:
+    from keith_llm.sft.build import build_sft_dataset
+
+    stats = build_sft_dataset(
+        args.out,
+        base_url=args.base_url,
+        max_per_source=args.max_per_source,
+        seed=args.seed,
+    )
+    print(json.dumps(stats, indent=2))
+    return 1 if stats["total"] == 0 else 0
+
+
 def _cmd_fetch_5etools(args: argparse.Namespace) -> int:
     from keith_llm.data.fivetools import fetch_all
 
@@ -323,6 +336,16 @@ def main(argv: list[str] | None = None) -> int:
         "--hard", action="store_true", help="with --apply, delete permanently instead of quarantine"
     )
     p.set_defaults(func=_cmd_dedup_report)
+
+    p = sub.add_parser(
+        "sft-build",
+        help="build the SFT instruction dataset (hand-written seed + grounded 5etools Q/A)",
+    )
+    p.add_argument("--out", default="data/sft/sft.jsonl")
+    p.add_argument("--base-url", default=None, help="5etools mirror for grounded Q/A (optional)")
+    p.add_argument("--max-per-source", type=int, default=None, help="cap Q/A per bestiary source")
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(func=_cmd_sft_build)
 
     p = sub.add_parser(
         "fetch-5etools",

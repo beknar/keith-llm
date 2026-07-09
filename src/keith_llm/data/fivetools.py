@@ -139,13 +139,17 @@ def render_monster(mon: dict[str, Any]) -> str:
     mtype = mon.get("type")
     if isinstance(mtype, dict):
         mtype = mtype.get("type", "")
-    meta = " ".join(str(x) for x in (mon.get("size", [""])[0], mtype) if x)
+    size = mon.get("size")
+    if isinstance(size, list):
+        size = size[0] if size else ""
+    meta = " ".join(str(x) for x in (size or "", mtype) if x)
     if align := mon.get("alignment"):
-        meta += ", " + " ".join(str(a) for a in align if isinstance(a, str))
+        if isinstance(align, list):
+            meta += ", " + " ".join(str(a) for a in align if isinstance(a, str))
     lines.append(meta)
 
     if ac := mon.get("ac"):
-        first = ac[0]
+        first = ac[0] if isinstance(ac, list) else ac
         lines.append(f"Armor Class {first.get('ac') if isinstance(first, dict) else first}")
     if hp := mon.get("hp"):
         if isinstance(hp, dict):

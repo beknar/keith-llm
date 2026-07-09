@@ -37,6 +37,9 @@ Repository = "https://github.com/beknar/keith-llm"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"keith_llm.sft" = ["*.jsonl"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

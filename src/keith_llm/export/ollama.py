@@ -7,6 +7,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from keith_llm.sft.format import INSTRUCTION_HEADER, RESPONSE_HEADER, STOP_SEQUENCES
+
 logger = logging.getLogger(__name__)
 
 # Raw-completion template: the base model has no chat format. Prompts should
@@ -21,12 +23,44 @@ PARAMETER repeat_penalty 1.1
 """
 
 
-def write_modelfile(gguf_path: str | Path, out_path: str | Path | None = None) -> Path:
+def _chat_modelfile(gguf_name: str, num_predict: int) -> str:
+    """Instruction/Response chat Modelfile for an SFT model. The TEMPLATE is
+    built from the SFT format constants so it byte-matches training's
+    ``build_prompt``; it stops on <|eos|> and on the instruction header (so a
+    run-on can't fake a new turn), and caps generation length."""
+    template = f"{INSTRUCTION_HEADER}{{{{ .Prompt }}}}{RESPONSE_HEADER}"
+    lines = [
+        f"FROM ./{gguf_name}",
+        f'TEMPLATE """{template}"""',
+        'PARAMETER stop "<|eos|>"',
+    ]
+    lines += [f'PARAMETER stop "{s}"' for s in STOP_SEQUENCES]
+    lines += [
+        f"PARAMETER num_predict {num_predict}",
+        "PARAMETER temperature 0.7",
+        "PARAMETER top_p 0.95",
+        "PARAMETER repeat_penalty 1.1",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def write_modelfile(
+    gguf_path: str | Path,
+    out_path: str | Path | None = None,
+    chat: bool = False,
+    num_predict: int = 512,
+) -> Path:
+    """Write a Modelfile. ``chat=True`` wraps input in the SFT Instruction/
+    Response template (for an instruction-tuned model); otherwise a raw-
+    completion template (for a base model)."""
     gguf_path = Path(gguf_path)
     if not gguf_path.exists():
         raise FileNotFoundError(gguf_path)
     out_path = Path(out_path) if out_path else gguf_path.parent / "Modelfile"
-    out_path.write_text(MODELFILE_TEMPLATE.format(gguf_name=gguf_path.name))
+    if chat:
+        out_path.write_text(_chat_modelfile(gguf_path.name, num_predict))
+    else:
+        out_path.write_text(MODELFILE_TEMPLATE.format(gguf_name=gguf_path.name))
     return out_path
 
 

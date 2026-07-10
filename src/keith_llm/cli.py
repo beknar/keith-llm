@@ -169,6 +169,31 @@ def _cmd_sft(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_chat(args: argparse.Namespace) -> int:
+    import torch
+
+    from keith_llm.config import ModelConfig
+    from keith_llm.model import Transformer
+    from keith_llm.sft.chat import chat_once, chat_repl
+    from keith_llm.tokenizer.wrapper import KeithTokenizer
+    from keith_llm.train.checkpoint import load_checkpoint
+
+    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    ckpt = load_checkpoint(args.ckpt, map_location=device)
+    cfg = ModelConfig(**ckpt["model_cfg"])
+    model = Transformer(cfg).to(device)
+    model.load_state_dict(ckpt["model_state"])
+    model.eval()
+    tok = KeithTokenizer.load(args.tokenizer)
+
+    gen = dict(max_new_tokens=args.max_new_tokens, temperature=args.temperature)
+    if args.message:
+        print(chat_once(model, tok, args.message, **gen))
+    else:
+        chat_repl(model, tok, **gen)
+    return 0
+
+
 def _cmd_sft_build(args: argparse.Namespace) -> int:
     from keith_llm.sft.build import build_sft_dataset
 
@@ -292,9 +317,10 @@ def _cmd_quantize(args: argparse.Namespace) -> int:
 def _cmd_ollama(args: argparse.Namespace) -> int:
     from keith_llm.export.ollama import register, write_modelfile
 
-    modelfile = write_modelfile(args.gguf)
+    modelfile = write_modelfile(args.gguf, chat=args.chat)
     register(args.name, modelfile)
-    print(f"registered {args.name}; try: ollama run {args.name}")
+    kind = "chat" if args.chat else "completion"
+    print(f"registered {args.name} ({kind}); try: ollama run {args.name}")
     return 0
 
 
@@ -357,6 +383,15 @@ def main(argv: list[str] | None = None) -> int:
         "--hard", action="store_true", help="with --apply, delete permanently instead of quarantine"
     )
     p.set_defaults(func=_cmd_dedup_report)
+
+    p = sub.add_parser("chat", help="chat locally with an SFT checkpoint (no ollama needed)")
+    p.add_argument("--ckpt", required=True, help="SFT checkpoint (latest.pt)")
+    p.add_argument("--tokenizer", default="data/tokenizer/tokenizer.json")
+    p.add_argument("--message", default=None, help="one-shot message (omit for interactive REPL)")
+    p.add_argument("--max-new-tokens", type=int, default=512)
+    p.add_argument("--temperature", type=float, default=0.7)
+    p.add_argument("--device", default=None)
+    p.set_defaults(func=_cmd_chat)
 
     p = sub.add_parser("sft", help="instruction-tune (SFT) a base checkpoint on an SFT dataset")
     p.add_argument("--base", required=True, help="base checkpoint to fine-tune (latest.pt)")
@@ -444,6 +479,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("ollama", help="write a Modelfile and register the GGUF with ollama")
     p.add_argument("--gguf", required=True)
     p.add_argument("--name", default="keith-llm")
+    p.add_argument(
+        "--chat",
+        action="store_true",
+        help="instruction/chat Modelfile for an SFT model (default is raw completion)",
+    )
     p.set_defaults(func=_cmd_ollama)
 
     args = parser.parse_args(argv)

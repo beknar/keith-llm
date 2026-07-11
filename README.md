@@ -137,14 +137,19 @@ The full pipeline has been exercised end-to-end on an RTX 4090:
   generation cycles with flat RSS and CUDA-allocated memory
 - The 125m+ presets are wired up and waiting on a larger corpus
 
-## Future features
+## Future Fixes and Features
 
-- Instruction-tuning pass (adventure outline → full adventure) on top of the
-  pretrained base
-- Grouped-query attention for cheaper 350M/500M inference
-- Structured stat-block generation with grammar-constrained sampling
-- Corpus expansion: Pathfinder 2e (ORC license), more open adventures
-- Perplexity-based quant-quality gate in CI for exported GGUFs
+The prioritized roadmap of known issues, quality improvements, and planned
+features lives in **[docs/future-fixes.md](docs/future-fixes.md)**. Highlights:
+
+- **[fix]** SFT instruction-following collapse — richer/varied instruction data
+  + lighter fine-tuning (the biggest lever on chatbot quality)
+- **[feature]** Synthetic instruction data (distillation) for genuine breadth
+- **[feature]** Broaden + grow the corpus with curated general-domain text
+  (domain-upweighted, `generic`-tagged)
+- **[feature]** Scaling to 1B+ (needs gradient checkpointing / 8-bit optimizer /
+  LoRA), RAG for grounded Q&A, grouped-query attention, structured stat-block
+  generation, and a perplexity-based quant-quality gate
 
 ## License
 

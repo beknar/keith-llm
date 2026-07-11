@@ -79,3 +79,27 @@ def ocr_pdf_pages(
     finally:
         pdf.close()
     return out
+
+
+def ocr_pdf(path: str, dpi: int = _DEFAULT_DPI, lang: str = _DEFAULT_LANG) -> str:
+    """OCR every page of a PDF and join in page order. Used as a fallback when
+    a PDF's text layer is garbled (the rendered image is fine even when the
+    font map is broken)."""
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(path)
+    try:
+        n_pages = len(pdf)
+    finally:
+        pdf.close()
+    pages = ocr_pdf_pages(path, range(n_pages), dpi=dpi, lang=lang)
+    return "\n\n".join(pages[i] for i in sorted(pages))
+
+
+def ocr_image(path: str, lang: str = _DEFAULT_LANG) -> str:
+    """OCR a standalone image file (JPG/PNG/TIFF/…)."""
+    import pytesseract
+    from PIL import Image
+
+    with Image.open(path) as img:
+        return pytesseract.image_to_string(img, lang=lang)

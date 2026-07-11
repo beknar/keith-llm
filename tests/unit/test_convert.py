@@ -178,6 +178,22 @@ def test_convert_tree_skips_symlinks(tmp_path):
     assert (out / "real.txt.txt").exists()
 
 
+def test_convert_tree_skips_mac_junk(tmp_path):
+    # Mac-made zips are full of __MACOSX/._* AppleDouble files with real
+    # extensions but no data — skip them, don't try (and fail) to OCR them.
+    src = tmp_path / "src"
+    (src / "__MACOSX").mkdir(parents=True)
+    (src / "__MACOSX" / "._art.jpg").write_bytes(b"not an image")
+    (src / "._MD-1.tif").write_bytes(b"junk")
+    (src / ".DS_Store").write_bytes(b"junk")
+    (src / "real.txt").write_text(PROSE * 2)
+    out = tmp_path / "out"
+    stats = convert_tree(src, out, enable_ocr=False)
+    assert stats["converted"] == 1
+    assert stats["failed"] == 0  # junk skipped, not attempted -> no failures
+    assert (out / "real.txt.txt").exists()
+
+
 def test_convert_tree_rejects_non_directory_src(tmp_path):
     import pytest
 

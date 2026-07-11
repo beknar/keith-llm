@@ -48,6 +48,13 @@ _MAX_ARCHIVE_BYTES = 4 * 1024**3  # 4 GB uncompressed per archive (bomb guard)
 _MAX_ARCHIVE_MEMBERS = 20_000
 
 
+def _is_junk(name: str) -> bool:
+    """OS metadata cruft that isn't real content — e.g. macOS AppleDouble
+    ``._foo`` resource forks and the ``__MACOSX`` dir that fill Mac-made zips,
+    plus ``.DS_Store`` / ``Thumbs.db``. These carry real extensions but no data."""
+    return name == "__MACOSX" or name.startswith("._") or name in {".DS_Store", "Thumbs.db"}
+
+
 # --- HTML ---
 
 
@@ -247,7 +254,7 @@ def convert_tree(
     def walk(path: Path, rel: Path, depth: int) -> None:
         # Never follow symlinks (a dir symlink could loop or escape the tree),
         # and cap nesting depth (stops archive-quines and pathological trees).
-        if path.is_symlink():
+        if path.is_symlink() or _is_junk(path.name):
             stats["skipped"] += 1
             return
         if depth > _MAX_DEPTH:

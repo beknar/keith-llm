@@ -14,6 +14,21 @@ import sys
 from keith_llm import __version__
 
 
+def _cmd_convert(args: argparse.Namespace) -> int:
+    from keith_llm.data.convert import convert_tree
+
+    stats = convert_tree(
+        args.src,
+        args.out,
+        enable_ocr=not args.no_ocr,
+        do_reflow=not args.no_reflow,
+        do_fix_spacing=not args.no_fix_spacing,
+        min_chars=args.min_chars,
+    )
+    print(json.dumps(stats, indent=2))
+    return 0
+
+
 def _cmd_ingest(args: argparse.Namespace) -> int:
     from keith_llm.data.corpus import build_corpus
 
@@ -331,6 +346,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--version", action="version", version=f"keith-llm {__version__}")
     sub = parser.add_subparsers(dest="command")
+
+    p = sub.add_parser(
+        "convert",
+        help="convert a tree of PDFs/HTML/images/archives into clean readable .txt files",
+    )
+    p.add_argument("--src", required=True, help="directory of source files to convert")
+    p.add_argument("--out", required=True, help="directory to write converted .txt files to")
+    p.add_argument("--no-ocr", action="store_true", help="skip OCR of images and scanned PDFs")
+    p.add_argument("--no-reflow", action="store_true", help="keep original line breaks")
+    p.add_argument("--no-fix-spacing", action="store_true", help="don't split run-together words")
+    p.add_argument("--min-chars", type=int, default=200, help="discard results shorter than this")
+    p.set_defaults(func=_cmd_convert)
 
     p = sub.add_parser("ingest", help="build cleaned, deduplicated corpus.jsonl from the manifest")
     p.add_argument("--manifest", default="data/sources.yaml")

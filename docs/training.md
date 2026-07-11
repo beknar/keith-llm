@@ -27,6 +27,12 @@ Install ollama (optional, for serving): `curl -fsSL https://ollama.com/install.s
 cd /genai/keith-llm && source .venv/bin/activate
 git pull                      # code arrives via git, never rsync
 scripts/fetch_seed_data.sh    # SRD 5.1 + OpenD6 into data/seed/
+# Got a pile of messy source files (PDFs full of images, scans, HTML, JPGs,
+# archives)? Pre-convert them to clean readable .txt first — image/scan OCR,
+# garbled-text-layer re-OCR, clumped-word repair, and a gibberish gate that
+# discards art/maps/no-text files (needs the `convert` extra + tesseract):
+#   keith-llm convert --src /path/to/messy --out data/raw/<system>/<doc_type>
+#
 # drop your own books under data/raw/<system>/<doc_type>/ and add matching
 # entries to data/sources.yaml. Archives (.zip, .tar[.gz/.bz2/.xz], .tgz) and
 # single-file .gz/.bz2/.xz are expanded automatically; their contained

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 import tarfile
 import tempfile
 import zipfile
@@ -43,6 +42,10 @@ CONVERTIBLE_EXTS = PDF_EXTS | HTML_EXTS | IMAGE_EXTS | TEXT_EXTS
 
 _LONG_TOKEN = re.compile(r"[A-Za-z]{19,}")  # candidate clumped-word runs
 _BLANKLINE = re.compile(r"\n\s*\n")
+
+_MAX_DEPTH = 40  # dir/archive nesting cap — stops symlink loops and archive quines
+_MAX_ARCHIVE_BYTES = 4 * 1024**3  # 4 GB uncompressed per archive (bomb guard)
+_MAX_ARCHIVE_MEMBERS = 20_000
 
 
 # --- HTML ---
@@ -140,7 +143,7 @@ def _pdf_to_text(path: Path, enable_ocr: bool, min_chars: int) -> str:
 
         logger.info("PDF text layer looks garbled; re-OCRing %s", path.name)
         ocr_text = clean_text(ocr_pdf(str(path)))
-        if is_readable(ocr_text, min_chars) or len(ocr_text) > len(text):
+        if is_readable(ocr_text, min_chars):  # only swap in OCR if it's actually readable
             text = ocr_text
     return text
 
@@ -181,8 +184,26 @@ def convert_file(
 # --- archives ---
 
 
+def _check_budget(total_bytes: int, count: int, name: str) -> None:
+    """Reject a decompression bomb before extracting."""
+    if total_bytes > _MAX_ARCHIVE_BYTES:
+        raise ValueError(f"{name} inflates to {total_bytes} bytes (> {_MAX_ARCHIVE_BYTES} cap)")
+    if count > _MAX_ARCHIVE_MEMBERS:
+        raise ValueError(f"{name} has {count} members (> {_MAX_ARCHIVE_MEMBERS} cap)")
+
+
+def _copy_capped(src, dst, cap: int) -> None:
+    written = 0
+    while chunk := src.read(1 << 20):
+        written += len(chunk)
+        if written > cap:
+            raise ValueError(f"compressed stream exceeds {cap}-byte cap")
+        dst.write(chunk)
+
+
 def _extract_archive(path: Path, dest: Path) -> None:
-    """Safely extract an archive into ``dest`` (traversal-guarded)."""
+    """Safely extract an archive into ``dest``: traversal-guarded (modern
+    zipfile/tarfile sanitize member paths) and bomb-guarded (size/member caps)."""
     suffix = path.suffix.lower()
     suffixes = [s.lower() for s in path.suffixes]
     is_tar = suffix in {".tar", ".tgz", ".tbz2", ".tbz", ".txz"} or (
@@ -190,14 +211,18 @@ def _extract_archive(path: Path, dest: Path) -> None:
     )
     if suffix == ".zip":
         with zipfile.ZipFile(path) as zf:
+            infos = zf.infolist()
+            _check_budget(sum(i.file_size for i in infos), len(infos), path.name)
             zf.extractall(dest)  # zipfile sanitizes member paths
     elif is_tar:
         with tarfile.open(path) as tf:
+            members = tf.getmembers()
+            _check_budget(sum(m.size for m in members), len(members), path.name)
             tf.extractall(dest, filter="data")  # rejects traversal/special files
     elif suffix in _SINGLE_OPENERS:
         inner = dest / path.name[: -len(path.suffix)]
         with _SINGLE_OPENERS[suffix](path, "rb") as src, inner.open("wb") as out:
-            shutil.copyfileobj(src, out)
+            _copy_capped(src, out, _MAX_ARCHIVE_BYTES)
 
 
 # --- tree walk ---
@@ -214,14 +239,25 @@ def convert_tree(
     """Convert every convertible file under ``src`` into readable ``.txt`` files
     mirrored under ``out``. Recurses subdirectories and archives; discards
     unreadable results. Returns summary stats."""
-    src, out = Path(src), Path(out)
+    src, out = Path(src).resolve(), Path(out)
+    if not src.is_dir():
+        raise NotADirectoryError(f"--src is not a directory: {src}")
     stats = {"converted": 0, "rejected": 0, "skipped": 0, "archives": 0, "failed": 0}
 
-    def walk(path: Path, rel: Path) -> None:
+    def walk(path: Path, rel: Path, depth: int) -> None:
+        # Never follow symlinks (a dir symlink could loop or escape the tree),
+        # and cap nesting depth (stops archive-quines and pathological trees).
+        if path.is_symlink():
+            stats["skipped"] += 1
+            return
+        if depth > _MAX_DEPTH:
+            logger.warning("max nesting depth reached, skipping: %s", rel)
+            stats["skipped"] += 1
+            return
         try:
             if path.is_dir():
                 for child in sorted(path.iterdir()):
-                    walk(child, rel / child.name)
+                    walk(child, rel / child.name, depth + 1)
                 return
             if is_archive(path):
                 stats["archives"] += 1
@@ -232,7 +268,7 @@ def convert_tree(
                         logger.warning("could not extract archive %s: %s", rel, exc)
                         return
                     for child in sorted(Path(tmp).iterdir()):
-                        walk(child, rel / child.name)  # nest outputs under the archive name
+                        walk(child, rel / child.name, depth + 1)  # nest under the archive name
                 return
             if path.suffix.lower() not in CONVERTIBLE_EXTS:
                 stats["skipped"] += 1
@@ -246,13 +282,14 @@ def convert_tree(
             stats["rejected"] += 1
             logger.info("discarded (unreadable / no text): %s", rel)
             return
-        dest = out / rel.with_suffix(".txt")
+        # Append .txt to the full name (not replace the suffix) so foo.pdf and
+        # foo.html don't both collapse to foo.txt and clobber each other.
+        dest = out / rel.parent / f"{rel.name}.txt"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text, encoding="utf-8")
         stats["converted"] += 1
 
-    src = src.resolve()
     for child in sorted(src.iterdir()):
-        walk(child, Path(child.name))
+        walk(child, Path(child.name), 0)
     logger.info("conversion complete: %s", stats)
     return stats

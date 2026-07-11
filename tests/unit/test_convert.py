@@ -146,9 +146,45 @@ def test_convert_tree_mirrors_structure(tmp_path):
     assert stats["converted"] == 2
     assert stats["rejected"] == 1
     assert stats["skipped"] == 1
-    assert (out / "adv1" / "story.txt").read_text().startswith("The village of Emberfall")
-    assert (out / "adv1" / "notes.txt").exists()
+    # output name appends .txt to the full source name (collision-safe)
+    assert (out / "adv1" / "story.txt.txt").read_text().startswith("The village of Emberfall")
+    assert (out / "adv1" / "notes.md.txt").exists()
     assert not (out / "junk.txt").exists()
+
+
+def test_convert_tree_no_same_stem_collision(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "doc.txt").write_text(PROSE * 2)
+    (src / "doc.md").write_text(PROSE.replace("Emberfall", "Redwater") * 2)
+    out = tmp_path / "out"
+    convert_tree(src, out, enable_ocr=False)
+    # both survive — no clobber (would collide if we replaced the suffix)
+    assert (out / "doc.txt.txt").exists()
+    assert (out / "doc.md.txt").exists()
+
+
+def test_convert_tree_skips_symlinks(tmp_path):
+    import os
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "real.txt").write_text(PROSE * 2)
+    # a directory symlink back at src would loop forever without the guard
+    os.symlink(src, src / "loop", target_is_directory=True)
+    out = tmp_path / "out"
+    stats = convert_tree(src, out, enable_ocr=False)  # must return, not hang
+    assert stats["converted"] == 1
+    assert (out / "real.txt.txt").exists()
+
+
+def test_convert_tree_rejects_non_directory_src(tmp_path):
+    import pytest
+
+    f = tmp_path / "notadir.txt"
+    f.write_text("x")
+    with pytest.raises(NotADirectoryError):
+        convert_tree(f, tmp_path / "out")
 
 
 def test_convert_tree_expands_archives(tmp_path):
@@ -162,8 +198,18 @@ def test_convert_tree_expands_archives(tmp_path):
     assert stats["archives"] == 2
     assert stats["converted"] == 2
     # outputs nested under the archive filename
-    assert (out / "pack.zip" / "inner" / "tale.txt").exists()
-    assert (out / "bundle.tar.gz" / "lore.txt").exists()
+    assert (out / "pack.zip" / "inner" / "tale.txt.txt").exists()
+    assert (out / "bundle.tar.gz" / "lore.md.txt").exists()
+
+
+def test_extract_archive_rejects_bomb(tmp_path, monkeypatch):
+    monkeypatch.setattr(convert, "_MAX_ARCHIVE_BYTES", 100)
+    z = tmp_path / "bomb.zip"
+    _write_zip(z, {"big.txt": b"x" * 5000})
+    import pytest
+
+    with pytest.raises(ValueError, match="inflates"):
+        convert._extract_archive(z, tmp_path / "d")
 
 
 def test_convert_tree_survives_bad_file(tmp_path):

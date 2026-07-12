@@ -146,16 +146,17 @@ def _is_faithful(
     """Decide whether a rewrite is a faithful reformat rather than an invention,
     deletion, or number-tampering. Returns ``(ok, metrics)``."""
     if not cleaned:
-        return False, {"precision": 0.0, "recall": 0.0, "numbers_ok": False}
+        return False, {"precision": 0.0, "recall": 0.0, "numbers_ok": False, "length_ratio": 0.0}
     precision = faithfulness(original, cleaned)  # cleaned grams present in original -> no invention
     recall = faithfulness(cleaned, original)  # original grams present in cleaned -> no deletion
     numbers_ok = _numbers_preserved(original, cleaned)
-    length_ok = len(cleaned) >= 0.5 * len(original)  # cheap wholesale-truncation guard
-    ok = precision >= min_overlap and recall >= min_retain and numbers_ok and length_ok
+    length_ratio = len(cleaned) / len(original) if original else 0.0
+    ok = precision >= min_overlap and recall >= min_retain and numbers_ok and length_ratio >= 0.5
     return ok, {
         "precision": round(precision, 3),
         "recall": round(recall, 3),
         "numbers_ok": numbers_ok,
+        "length_ratio": round(length_ratio, 3),
     }
 
 
@@ -279,6 +280,7 @@ def clean_corpus(
                 "new": new["verdict"],
                 "overlap": fmetrics["precision"],
                 "retain": fmetrics["recall"],
+                "length_ratio": fmetrics["length_ratio"],
                 "numbers_ok": fmetrics["numbers_ok"],
                 "action": action,
                 "reason": reason,

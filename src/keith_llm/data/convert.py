@@ -235,6 +235,19 @@ def _extract_archive(path: Path, dest: Path) -> None:
 # --- tree walk ---
 
 
+def _is_fresh(dest: Path, src: Path) -> bool:
+    """True if a non-empty conversion of ``src`` already exists at ``dest`` and is
+    at least as new as ``src``. Lets a re-run skip the expensive re-extract/OCR
+    for files finished by an earlier (e.g. killed) run, while still re-converting
+    any source edited since. Archive members are extracted to fresh temp files
+    each run, so whether they skip depends on the archive preserving mtimes."""
+    try:
+        d = dest.stat()
+        return d.st_size > 0 and d.st_mtime >= src.stat().st_mtime
+    except OSError:
+        return False
+
+
 def convert_tree(
     src: str | Path,
     out: str | Path,
@@ -242,14 +255,19 @@ def convert_tree(
     do_reflow: bool = True,
     do_fix_spacing: bool = True,
     min_chars: int = 200,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Convert every convertible file under ``src`` into readable ``.txt`` files
     mirrored under ``out``. Recurses subdirectories and archives; discards
-    unreadable results. Returns summary stats."""
+    unreadable results. Returns summary stats.
+
+    Resumable: a file whose ``.txt`` output already exists and is newer than the
+    source is skipped (counted as ``cached``), so a killed run can be restarted
+    cheaply. Pass ``force`` to reconvert everything."""
     src, out = Path(src).resolve(), Path(out)
     if not src.is_dir():
         raise NotADirectoryError(f"--src is not a directory: {src}")
-    stats = {"converted": 0, "rejected": 0, "skipped": 0, "archives": 0, "failed": 0}
+    stats = {"converted": 0, "cached": 0, "rejected": 0, "skipped": 0, "archives": 0, "failed": 0}
 
     def walk(path: Path, rel: Path, depth: int) -> None:
         # Never follow symlinks (a dir symlink could loop or escape the tree),
@@ -280,6 +298,12 @@ def convert_tree(
             if path.suffix.lower() not in CONVERTIBLE_EXTS:
                 stats["skipped"] += 1
                 return
+            # Append .txt to the full name (not replace the suffix) so foo.pdf and
+            # foo.html don't both collapse to foo.txt and clobber each other.
+            dest = out / rel.parent / f"{rel.name}.txt"
+            if not force and _is_fresh(dest, path):
+                stats["cached"] += 1
+                return
             text = convert_file(path, enable_ocr, do_reflow, do_fix_spacing, min_chars)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the run
             logger.warning("conversion failed for %s: %s", rel, exc)
@@ -289,9 +313,6 @@ def convert_tree(
             stats["rejected"] += 1
             logger.info("discarded (unreadable / no text): %s", rel)
             return
-        # Append .txt to the full name (not replace the suffix) so foo.pdf and
-        # foo.html don't both collapse to foo.txt and clobber each other.
-        dest = out / rel.parent / f"{rel.name}.txt"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text, encoding="utf-8")
         stats["converted"] += 1

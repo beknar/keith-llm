@@ -203,6 +203,79 @@ def test_convert_tree_rejects_non_directory_src(tmp_path):
         convert_tree(f, tmp_path / "out")
 
 
+# --- resume: skip files already converted by an earlier run ---
+
+
+def test_convert_tree_resumes_from_existing_output(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.txt").write_text(PROSE * 2)
+    (src / "b.txt").write_text(PROSE.replace("Emberfall", "Redwater") * 2)
+    out = tmp_path / "out"
+
+    first = convert_tree(src, out, enable_ocr=False)
+    assert first["converted"] == 2
+    assert first["cached"] == 0
+
+    # a re-run must not re-read anything: fail hard if convert_file is called
+    def boom(*a, **k):
+        raise AssertionError("convert_file should not run for a cached file")
+
+    monkeypatch.setattr(convert, "convert_file", boom)
+    second = convert_tree(src, out, enable_ocr=False)
+    assert second["converted"] == 0
+    assert second["cached"] == 2
+
+
+def test_convert_tree_reconverts_when_source_is_newer(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    f = src / "a.txt"
+    f.write_text(PROSE * 2)
+    out = tmp_path / "out"
+    convert_tree(src, out, enable_ocr=False)
+    dest = out / "a.txt.txt"
+
+    # edit the source and stamp it newer than the existing output
+    f.write_text(PROSE.replace("Emberfall", "Newhaven") * 2)
+    import os
+
+    future = dest.stat().st_mtime + 100
+    os.utime(f, (future, future))
+
+    stats = convert_tree(src, out, enable_ocr=False)
+    assert stats["converted"] == 1
+    assert stats["cached"] == 0
+    assert "Newhaven" in dest.read_text()
+
+
+def test_convert_tree_force_reconverts_everything(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.txt").write_text(PROSE * 2)
+    out = tmp_path / "out"
+    convert_tree(src, out, enable_ocr=False)
+
+    stats = convert_tree(src, out, enable_ocr=False, force=True)
+    assert stats["converted"] == 1
+    assert stats["cached"] == 0
+
+
+def test_convert_tree_reconverts_when_output_empty(tmp_path):
+    # a partial/empty .txt left by a killed write must not count as done
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.txt").write_text(PROSE * 2)
+    out = tmp_path / "out"
+    convert_tree(src, out, enable_ocr=False)
+    dest = out / "a.txt.txt"
+    dest.write_text("")  # simulate a truncated write
+
+    stats = convert_tree(src, out, enable_ocr=False)
+    assert stats["converted"] == 1
+    assert stats["cached"] == 0
+
+
 def test_convert_tree_expands_archives(tmp_path):
     src = tmp_path / "src"
     src.mkdir()

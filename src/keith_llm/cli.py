@@ -217,6 +217,10 @@ def _cmd_sft_build(args: argparse.Namespace) -> int:
         base_url=args.base_url,
         max_per_source=args.max_per_source,
         seed=args.seed,
+        generator=args.generator,
+        model=args.model,
+        ollama_url=args.ollama_url,
+        pairs_per_item=args.pairs_per_item,
     )
     print(json.dumps(stats, indent=2))
     return 1 if stats["total"] == 0 else 0
@@ -439,6 +443,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--base-url", default=None, help="5etools mirror for grounded Q/A (optional)")
     p.add_argument("--max-per-source", type=int, default=None, help="cap Q/A per bestiary source")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--generator",
+        choices=["programmatic", "ollama", "both"],
+        default="programmatic",
+        help="how to make grounded pairs: fixed templates, LLM-synthesized (varied), or both",
+    )
+    p.add_argument(
+        "--model", default="gpt-oss", help="local ollama model for --generator ollama/both"
+    )
+    p.add_argument("--ollama-url", default="http://localhost:11434")
+    p.add_argument("--pairs-per-item", type=int, default=5, help="synthesized pairs per monster")
     p.set_defaults(func=_cmd_sft_build)
 
     p = sub.add_parser(

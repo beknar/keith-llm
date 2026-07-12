@@ -226,6 +226,34 @@ def _cmd_sft_build(args: argparse.Namespace) -> int:
     return 1 if stats["total"] == 0 else 0
 
 
+def _cmd_clean_llm(args: argparse.Namespace) -> int:
+    from keith_llm.data.llm_clean import clean_corpus
+
+    verdicts = ("BAD",) if args.bad_only else ("BAD", "WARN")
+    stats = clean_corpus(
+        args.corpus,
+        args.out,
+        model=args.model,
+        ollama_url=args.ollama_url,
+        target_verdicts=verdicts,
+        min_overlap=args.min_overlap,
+        min_retain=args.min_retain,
+        drop_failed=args.drop_failed,
+        max_chars=args.max_chars,
+        max_docs=args.max_docs,
+        dry_run=args.dry_run,
+    )
+    printable = {k: v for k, v in stats.items() if k != "report"}
+    print(json.dumps(printable, indent=2))
+    for r in stats["report"]:
+        if r["action"] != "keep" or r.get("reason") != "not_improved":
+            flow = f"{r['old']}->{r.get('new', '?')}" if "new" in r else r["old"]
+            print(f"  {r['action']:<7} {flow:<10} ov={r.get('overlap', '-'):<5} {r['source']}")
+    if args.dry_run:
+        print("\n(dry run) nothing written; drop --dry-run to apply.")
+    return 0
+
+
 def _cmd_fetch_5etools(args: argparse.Namespace) -> int:
     from keith_llm.data.fivetools import fetch_all
 
@@ -400,6 +428,29 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default=None, help="write the full JSON report here")
     p.add_argument("--top", type=int, default=25, help="how many worst docs to print")
     p.set_defaults(func=_cmd_audit_corpus)
+
+    p = sub.add_parser(
+        "clean-llm",
+        help="repair audit-flagged corpus docs with a local LLM (grounded, verified)",
+    )
+    p.add_argument("--corpus", default="data/processed/corpus.jsonl")
+    p.add_argument("--out", default="data/processed/corpus.cleaned.jsonl")
+    p.add_argument("--model", default="gpt-oss", help="local ollama model to clean with")
+    p.add_argument("--ollama-url", default="http://localhost:11434")
+    p.add_argument("--bad-only", action="store_true", help="only clean BAD docs (skip WARN)")
+    p.add_argument(
+        "--min-overlap", type=float, default=0.80, help="min forward overlap (anti-invention)"
+    )
+    p.add_argument(
+        "--min-retain", type=float, default=0.60, help="min reverse overlap (anti-deletion)"
+    )
+    p.add_argument(
+        "--drop-failed", action="store_true", help="drop BAD docs that cleaning couldn't fix"
+    )
+    p.add_argument("--max-chars", type=int, default=6000, help="per-request chunk size")
+    p.add_argument("--max-docs", type=int, default=None, help="cap flagged docs processed (trial)")
+    p.add_argument("--dry-run", action="store_true", help="report outcomes without writing output")
+    p.set_defaults(func=_cmd_clean_llm)
 
     p = sub.add_parser(
         "dedup-report",

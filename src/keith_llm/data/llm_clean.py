@@ -10,9 +10,11 @@ quietly inject hallucinated facts into the training corpus:
 
 1. **Improvement** — the cleaned text must score better on the same audit
    metrics (better verdict, or a measurable gain in wordlike/interleave rates).
-2. **Faithfulness** — the cleaned text's letters must overlap the original's
-   almost entirely (character n-gram containment). Fixing spacing/columns keeps
-   the letters; inventing sentences introduces new ones, which fails the gate.
+2. **Faithfulness** — character n-gram containment in both directions plus a
+   numeric check. Fixing spacing/columns keeps the characters, so inventing
+   sentences (new grams), deleting content (missing grams / short output), or
+   changing a stat like ``2d6 -> 8d6`` (a number the original never had) each
+   trips the gate.
 
 A document that fails either gate keeps its original text (or is dropped, if it
 was ``BAD`` and ``drop_failed`` is set). Only audit-flagged documents are ever
@@ -24,6 +26,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +61,7 @@ _CLEAN_TMPL = (
 def _chunks(text: str, max_chars: int) -> list[str]:
     """Split ``text`` into <= ``max_chars`` pieces on paragraph boundaries, hard-
     splitting any single paragraph that is itself over budget."""
+    max_chars = max(1, max_chars)  # a 0/negative budget would loop forever below
     if len(text) <= max_chars:
         return [text]
     chunks: list[str] = []
@@ -101,21 +106,57 @@ def clean_text(client: OllamaClient, text: str, max_chars: int = 6000) -> str:
     return "\n\n".join(out).strip()
 
 
-def _letter_ngrams(text: str, n: int = 4) -> set[str]:
-    letters = "".join(c.lower() for c in text if c.isalpha())
-    return {letters[i : i + n] for i in range(len(letters) - n + 1)}
+def _alnum_ngrams(text: str, n: int = 4) -> set[str]:
+    # digits are kept so a changed dice/DC/HP value perturbs the surrounding
+    # n-grams (e.g. "deals2d6fire" -> "deals8d6fire") and shows up as new grams.
+    chars = "".join(c.lower() for c in text if c.isalnum())
+    return {chars[i : i + n] for i in range(len(chars) - n + 1)}
 
 
 def faithfulness(original: str, cleaned: str) -> float:
-    """Fraction of the cleaned text's letter 4-grams that also occur in the
-    original. ~1.0 when only spacing/columns changed; drops as the model
-    introduces letters that weren't there (i.e. invents content). Space- and
-    split-tolerant because spaces and punctuation are ignored."""
-    cleaned_grams = _letter_ngrams(cleaned)
+    """Fraction of the cleaned text's alphanumeric 4-grams that also occur in
+    the original. ~1.0 when only spacing/columns changed; drops as the model
+    introduces characters that weren't there (i.e. invents content). Space- and
+    split-tolerant because spaces and punctuation are ignored. This is a
+    *containment* (precision) measure: call it reversed to measure how much of
+    the original was retained (recall)."""
+    cleaned_grams = _alnum_ngrams(cleaned)
     if not cleaned_grams:
         return 0.0
-    original_grams = _letter_ngrams(original)
+    original_grams = _alnum_ngrams(original)
     return len(cleaned_grams & original_grams) / len(cleaned_grams)
+
+
+_NUM = re.compile(r"\d+(?:[.,/]\d+)?")
+
+
+def _numbers_preserved(original: str, cleaned: str) -> bool:
+    """True if every numeric literal in ``cleaned`` occurs at least as often in
+    ``original``. Reflow/junk-removal only drops numbers (still a subset), but a
+    model that *changes* a stat (2d6 -> 8d6, DC 15 -> DC 22) introduces a number
+    the original never had, which this rejects."""
+    orig = Counter(_NUM.findall(original))
+    new = Counter(_NUM.findall(cleaned))
+    return all(new[k] <= orig[k] for k in new)
+
+
+def _is_faithful(
+    original: str, cleaned: str, min_overlap: float, min_retain: float
+) -> tuple[bool, dict[str, Any]]:
+    """Decide whether a rewrite is a faithful reformat rather than an invention,
+    deletion, or number-tampering. Returns ``(ok, metrics)``."""
+    if not cleaned:
+        return False, {"precision": 0.0, "recall": 0.0, "numbers_ok": False}
+    precision = faithfulness(original, cleaned)  # cleaned grams present in original -> no invention
+    recall = faithfulness(cleaned, original)  # original grams present in cleaned -> no deletion
+    numbers_ok = _numbers_preserved(original, cleaned)
+    length_ok = len(cleaned) >= 0.5 * len(original)  # cheap wholesale-truncation guard
+    ok = precision >= min_overlap and recall >= min_retain and numbers_ok and length_ok
+    return ok, {
+        "precision": round(precision, 3),
+        "recall": round(recall, 3),
+        "numbers_ok": numbers_ok,
+    }
 
 
 def _improved(old: dict[str, Any], new: dict[str, Any]) -> bool:
@@ -138,6 +179,7 @@ def clean_corpus(
     ollama_url: str = DEFAULT_BASE_URL,
     target_verdicts: tuple[str, ...] = ("BAD", "WARN"),
     min_overlap: float = 0.80,
+    min_retain: float = 0.60,
     drop_failed: bool = False,
     max_chars: int = 6000,
     max_docs: int | None = None,
@@ -149,8 +191,11 @@ def clean_corpus(
 
     Only documents whose audit verdict is in ``target_verdicts`` are sent to the
     model. A rewrite replaces the original only if it both improves the audit
-    score and stays faithful (letter overlap >= ``min_overlap``); otherwise the
-    original is kept, or dropped when ``drop_failed`` and it was ``BAD``.
+    score and stays faithful: character overlap in both directions
+    (precision >= ``min_overlap`` guards against invented content,
+    recall >= ``min_retain`` and a length floor guard against wholesale
+    deletion) and every numeric literal preserved (no changed stats). Otherwise
+    the original is kept, or dropped when ``drop_failed`` and it was ``BAD``.
     ``max_docs`` caps how many flagged documents are actually processed (for a
     cheap trial run); the rest pass through untouched.
     """
@@ -174,6 +219,9 @@ def clean_corpus(
     processed = 0
 
     for rec in records:
+        if not rec.get("text"):  # malformed / textless record -> pass through untouched
+            out_records.append(rec)
+            continue
         old = score_text(rec["text"])
         if old["verdict"] not in target_verdicts:
             out_records.append(rec)
@@ -203,8 +251,7 @@ def clean_corpus(
             continue
 
         new = score_text(cleaned)
-        overlap = faithfulness(rec["text"], cleaned)
-        faithful = overlap >= min_overlap and bool(cleaned)
+        faithful, fmetrics = _is_faithful(rec["text"], cleaned, min_overlap, min_retain)
         improved = _improved(old, new)
 
         if faithful and improved:
@@ -230,7 +277,9 @@ def clean_corpus(
                 "source": source,
                 "old": old["verdict"],
                 "new": new["verdict"],
-                "overlap": round(overlap, 3),
+                "overlap": fmetrics["precision"],
+                "retain": fmetrics["recall"],
+                "numbers_ok": fmetrics["numbers_ok"],
                 "action": action,
                 "reason": reason,
             }

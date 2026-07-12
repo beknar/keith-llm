@@ -237,6 +237,7 @@ def _cmd_clean_llm(args: argparse.Namespace) -> int:
         ollama_url=args.ollama_url,
         target_verdicts=verdicts,
         min_overlap=args.min_overlap,
+        min_retain=args.min_retain,
         drop_failed=args.drop_failed,
         max_chars=args.max_chars,
         max_docs=args.max_docs,
@@ -438,7 +439,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ollama-url", default="http://localhost:11434")
     p.add_argument("--bad-only", action="store_true", help="only clean BAD docs (skip WARN)")
     p.add_argument(
-        "--min-overlap", type=float, default=0.80, help="min letter-overlap to trust a rewrite"
+        "--min-overlap", type=float, default=0.80, help="min forward overlap (anti-invention)"
+    )
+    p.add_argument(
+        "--min-retain", type=float, default=0.60, help="min reverse overlap (anti-deletion)"
     )
     p.add_argument(
         "--drop-failed", action="store_true", help="drop BAD docs that cleaning couldn't fix"

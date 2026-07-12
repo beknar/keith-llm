@@ -3,11 +3,15 @@ import json
 from keith_llm.data.audit import score_text
 from keith_llm.data.llm_clean import (
     _chunks,
+    _numbers_preserved,
     _strip_fences,
     clean_corpus,
     clean_text,
     faithfulness,
 )
+
+# a BAD doc that carries numbers/stats, so the numeric-preservation gate matters
+STAT_BAD = " ".join(["theGoblinDeals2d6fireDamageAndhasDC15saveArmorClass15"] * 40)
 
 # A document that extracts badly: run-together words (internal caps) trip the
 # audit BAD verdict. Its clean form uses the same letters, just re-spaced.
@@ -45,6 +49,19 @@ def test_faithfulness_low_when_invented():
 
 def test_faithfulness_zero_on_empty_clean():
     assert faithfulness("anything", "") == 0.0
+
+
+# --- numeric preservation ---
+
+
+def test_numbers_preserved_true_when_unchanged_or_dropped():
+    assert _numbers_preserved("deals 2d6 and DC 15", "deals 2d6, DC 15.")  # same numbers
+    assert _numbers_preserved("page 12: deals 2d6", "deals 2d6")  # dropped junk page number
+
+
+def test_numbers_preserved_false_when_stat_changed():
+    assert not _numbers_preserved("deals 2d6, DC 15", "deals 8d6, DC 15")  # 2 -> 8
+    assert not _numbers_preserved("DC 15 save", "DC 22 save")  # 15 -> 22
 
 
 # --- chunking ---
@@ -141,6 +158,45 @@ def test_unfaithful_rewrite_is_rejected(tmp_path):
     assert stats["kept"] == 1
     recs = [json.loads(line) for line in out.read_text().splitlines()]
     assert recs[0]["text"] == BAD_TEXT  # original preserved
+
+
+def test_faithful_stat_cleanup_with_numbers_is_accepted(tmp_path):
+    # a legitimate de-interleave that keeps every number must NOT be rejected
+    assert score_text(STAT_BAD)["verdict"] == "BAD"
+    corpus = _write_corpus(
+        tmp_path, [{"source": "bad.pdf", "system": "d", "doc_type": "r", "text": STAT_BAD}]
+    )
+    out = tmp_path / "cleaned.jsonl"
+    good = " ".join(["the goblin deals 2d6 fire damage and has DC 15 save armor class 15."] * 40)
+    stats = clean_corpus(corpus, out, client=_FakeClient(good))
+    assert stats["replaced"] == 1
+
+
+def test_number_tampering_is_rejected(tmp_path):
+    # letters line up perfectly, but the model changed 2d6->8d6 and DC15->DC22
+    corpus = _write_corpus(
+        tmp_path, [{"source": "bad.pdf", "system": "d", "doc_type": "r", "text": STAT_BAD}]
+    )
+    out = tmp_path / "cleaned.jsonl"
+    tampered = " ".join(["the Goblin Deals 8d6 fire Damage And has DC 22 save Armor Class 15"] * 40)
+    stats = clean_corpus(corpus, out, client=_FakeClient(tampered))
+    assert stats["replaced"] == 0
+    assert stats["unfaithful"] == 1  # rejected despite near-perfect letter overlap
+    recs = [json.loads(line) for line in out.read_text().splitlines()]
+    assert recs[0]["text"] == STAT_BAD  # original stats preserved
+
+
+def test_truncated_rewrite_is_rejected(tmp_path):
+    # model returns only a tiny prefix -> high precision but recall/length fail
+    corpus = _write_corpus(
+        tmp_path, [{"source": "bad.pdf", "system": "d", "doc_type": "r", "text": BAD_TEXT}]
+    )
+    out = tmp_path / "cleaned.jsonl"
+    stats = clean_corpus(corpus, out, client=_FakeClient("the goblin attacks"))
+    assert stats["replaced"] == 0
+    assert stats["unfaithful"] == 1
+    recs = [json.loads(line) for line in out.read_text().splitlines()]
+    assert recs[0]["text"] == BAD_TEXT
 
 
 def test_drop_failed_drops_unfixable_bad(tmp_path):

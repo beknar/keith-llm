@@ -3,7 +3,9 @@
 Combines the hand-written creative seed set (packaged ``seed.jsonl``) with
 grounded field-level Q/A generated from a 5etools mirror's bestiary JSON. Output
 is a shuffled JSONL of ``{"instruction", "response", "source"}`` — the input to
-SFT training. Deterministic given the same seed.
+SFT training. Deterministic given the same seed for the programmatic generator;
+the ``ollama``/``both`` generators call a local LLM at temperature, so their
+grounded pairs vary run to run.
 """
 
 from __future__ import annotations

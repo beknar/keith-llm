@@ -36,6 +36,22 @@ def test_parse_pairs_no_json():
     assert parse_pairs("[not valid json]") == []
 
 
+def test_parse_pairs_survives_stray_brackets_in_prose():
+    # brackets before AND after the real array must not corrupt the span
+    r = 'As requested [see below]:\n[{"question": "Q", "answer": "A"}]\nNote [1]: grounded.'
+    assert parse_pairs(r) == [("Q", "A")]
+
+
+def test_parse_pairs_takes_first_wellformed_array():
+    # a leading non-array bracket, then two arrays -> first valid array wins
+    r = '[oops\n[{"question": "Q1", "answer": "A1"}]\n[{"question": "Q2", "answer": "A2"}]'
+    assert parse_pairs(r) == [("Q1", "A1")]
+
+
+def test_parse_pairs_non_string_input():
+    assert parse_pairs(None) == []
+
+
 # --- synth_monster_pairs with a fake client ---
 
 
@@ -77,6 +93,49 @@ def test_synth_skips_copies_and_nameless():
 def test_client_available_false_when_unreachable():
     # nothing listening on this port -> available() returns False, never raises
     assert OllamaClient("m", base_url="http://127.0.0.1:1").available() is False
+
+
+class _FakeResp:
+    def __init__(self, content):
+        self._content = content
+
+    def read(self):
+        return json.dumps({"message": {"content": self._content}}).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_client_chat_retries_then_succeeds(monkeypatch):
+    import keith_llm.llm as llm_mod
+
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("transient")
+        return _FakeResp("hello")
+
+    monkeypatch.setattr(llm_mod.urllib.request, "urlopen", fake_urlopen)
+    assert OllamaClient("m", retries=2).chat("hi") == "hello"
+    assert calls["n"] == 2  # failed once, succeeded on retry
+
+
+def test_client_chat_raises_after_exhausting_retries(monkeypatch):
+    import pytest
+
+    import keith_llm.llm as llm_mod
+
+    def always_fail(req, timeout=None):
+        raise OSError("down")
+
+    monkeypatch.setattr(llm_mod.urllib.request, "urlopen", always_fail)
+    with pytest.raises(RuntimeError, match="after 3 attempts"):
+        OllamaClient("m", retries=2).chat("hi")
 
 
 # --- build integration with a mocked generator ---

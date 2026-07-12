@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
 from keith_llm.llm import OllamaClient
@@ -38,21 +37,37 @@ _MONSTER_TMPL = (
     '[{{"question": "...", "answer": "..."}}].'
 )
 
-_JSON_ARRAY = re.compile(r"\[.*\]", re.DOTALL)
+_DECODER = json.JSONDecoder()
+
+
+def _first_json_array(text: str) -> list[Any] | None:
+    """Return the first well-formed top-level JSON array in ``text``, ignoring
+    surrounding prose, code fences, or stray brackets. Scans each ``[`` and lets
+    the JSON decoder find the matching close, so a bracket in the prose (or a
+    second array) can't corrupt the span the way a first-to-last regex would."""
+    start = text.find("[")
+    while start != -1:
+        try:
+            value, _ = _DECODER.raw_decode(text, start)
+        except json.JSONDecodeError:
+            start = text.find("[", start + 1)
+            continue
+        if isinstance(value, list):
+            return value
+        start = text.find("[", start + 1)
+    return None
 
 
 def parse_pairs(response: str) -> list[Pair]:
     """Extract (question, answer) pairs from a model response. Robust to the
     model wrapping the JSON in prose or code fences; skips malformed items."""
-    match = _JSON_ARRAY.search(response)
-    if not match:
+    if not isinstance(response, str):
         return []
-    try:
-        items = json.loads(match.group(0))
-    except json.JSONDecodeError:
+    items = _first_json_array(response)
+    if items is None:
         return []
     pairs: list[Pair] = []
-    for item in items if isinstance(items, list) else []:
+    for item in items:
         if isinstance(item, dict):
             q, a = str(item.get("question", "")).strip(), str(item.get("answer", "")).strip()
             if q and a:

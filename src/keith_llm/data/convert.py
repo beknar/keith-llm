@@ -19,6 +19,7 @@ Optional capabilities degrade gracefully if their deps are missing:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import tarfile
 import tempfile
@@ -230,9 +231,32 @@ def _extract_archive(path: Path, dest: Path) -> None:
         inner = dest / path.name[: -len(path.suffix)]
         with _SINGLE_OPENERS[suffix](path, "rb") as src, inner.open("wb") as out:
             _copy_capped(src, out, _MAX_ARCHIVE_BYTES)
+        # Stamp the extracted member with the archive's mtime (zip/tar already
+        # preserve member mtimes) so a re-run's _is_fresh check can cache it
+        # instead of re-extracting and re-OCRing every time.
+        mtime = path.stat().st_mtime
+        os.utime(inner, (mtime, mtime))
 
 
 # --- tree walk ---
+
+
+def _is_fresh(dest: Path, src: Path) -> bool:
+    """True if a non-empty conversion of ``src`` already exists at ``dest`` and is
+    at least as new as ``src``. Lets a re-run skip the expensive re-extract/OCR
+    for files finished by an earlier (e.g. killed) run, while still re-converting
+    any source edited since. Archive members work too: they carry the archive's
+    stored/stamped mtime, older than the first run's output."""
+    # `>=` (not `>`) so a source and its output landing in the same coarse mtime
+    # tick still count as fresh; the cost is that a source edited *during* its own
+    # conversion (same tick as the dest write) could be skipped next run — rare,
+    # and --force clears it. Outputs are written atomically, so a non-empty .txt
+    # is always a complete conversion, never a truncated partial.
+    try:
+        d = dest.stat()
+        return d.st_size > 0 and d.st_mtime >= src.stat().st_mtime
+    except OSError:
+        return False
 
 
 def convert_tree(
@@ -242,14 +266,20 @@ def convert_tree(
     do_reflow: bool = True,
     do_fix_spacing: bool = True,
     min_chars: int = 200,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Convert every convertible file under ``src`` into readable ``.txt`` files
     mirrored under ``out``. Recurses subdirectories and archives; discards
-    unreadable results. Returns summary stats."""
+    unreadable results. Returns summary stats.
+
+    Resumable: a file whose ``.txt`` output already exists and is newer than the
+    source is skipped (counted as ``cached``), so a killed run can be restarted
+    cheaply — including files inside archives. Pass ``force`` to reconvert
+    everything."""
     src, out = Path(src).resolve(), Path(out)
     if not src.is_dir():
         raise NotADirectoryError(f"--src is not a directory: {src}")
-    stats = {"converted": 0, "rejected": 0, "skipped": 0, "archives": 0, "failed": 0}
+    stats = {"converted": 0, "cached": 0, "rejected": 0, "skipped": 0, "archives": 0, "failed": 0}
 
     def walk(path: Path, rel: Path, depth: int) -> None:
         # Never follow symlinks (a dir symlink could loop or escape the tree),
@@ -280,6 +310,12 @@ def convert_tree(
             if path.suffix.lower() not in CONVERTIBLE_EXTS:
                 stats["skipped"] += 1
                 return
+            # Append .txt to the full name (not replace the suffix) so foo.pdf and
+            # foo.html don't both collapse to foo.txt and clobber each other.
+            dest = out / rel.parent / f"{rel.name}.txt"
+            if not force and _is_fresh(dest, path):
+                stats["cached"] += 1
+                return
             text = convert_file(path, enable_ocr, do_reflow, do_fix_spacing, min_chars)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the run
             logger.warning("conversion failed for %s: %s", rel, exc)
@@ -289,11 +325,19 @@ def convert_tree(
             stats["rejected"] += 1
             logger.info("discarded (unreadable / no text): %s", rel)
             return
-        # Append .txt to the full name (not replace the suffix) so foo.pdf and
-        # foo.html don't both collapse to foo.txt and clobber each other.
-        dest = out / rel.parent / f"{rel.name}.txt"
+        # Write atomically: a run killed mid-write must never leave a truncated
+        # but non-empty .txt, which _is_fresh would then treat as complete and
+        # cache forever. Write a temp sibling, then atomically rename over dest.
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(text, encoding="utf-8")
+        tmp = dest.with_name(dest.name + ".tmp")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, dest)
+        except OSError as exc:  # noqa: BLE001 - a write failure must not stop the run
+            logger.warning("could not write %s: %s", dest, exc)
+            tmp.unlink(missing_ok=True)
+            stats["failed"] += 1
+            return
         stats["converted"] += 1
 
     for child in sorted(src.iterdir()):

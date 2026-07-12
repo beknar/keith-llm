@@ -24,6 +24,7 @@ def _cmd_convert(args: argparse.Namespace) -> int:
         do_reflow=not args.no_reflow,
         do_fix_spacing=not args.no_fix_spacing,
         min_chars=args.min_chars,
+        force=args.force,
     )
     print(json.dumps(stats, indent=2))
     return 0
@@ -389,6 +390,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-reflow", action="store_true", help="keep original line breaks")
     p.add_argument("--no-fix-spacing", action="store_true", help="don't split run-together words")
     p.add_argument("--min-chars", type=int, default=200, help="discard results shorter than this")
+    p.add_argument(
+        "--force", action="store_true", help="reconvert files even if an up-to-date .txt exists"
+    )
     p.set_defaults(func=_cmd_convert)
 
     p = sub.add_parser("ingest", help="build cleaned, deduplicated corpus.jsonl from the manifest")

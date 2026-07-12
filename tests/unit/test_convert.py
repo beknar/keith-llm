@@ -262,7 +262,7 @@ def test_convert_tree_force_reconverts_everything(tmp_path):
 
 
 def test_convert_tree_reconverts_when_output_empty(tmp_path):
-    # a partial/empty .txt left by a killed write must not count as done
+    # a 0-byte .txt left by a killed write must not count as done
     src = tmp_path / "src"
     src.mkdir()
     (src / "a.txt").write_text(PROSE * 2)
@@ -274,6 +274,44 @@ def test_convert_tree_reconverts_when_output_empty(tmp_path):
     stats = convert_tree(src, out, enable_ocr=False)
     assert stats["converted"] == 1
     assert stats["cached"] == 0
+
+
+def test_convert_tree_write_is_atomic_no_partial_output(tmp_path, monkeypatch):
+    # a crash at the commit point must leave NO .txt (not a truncated one that
+    # a later run would wrongly cache), and must not abort the whole run
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.txt").write_text(PROSE * 2)
+    (src / "b.txt").write_text(PROSE.replace("Emberfall", "Redwater") * 2)
+    out = tmp_path / "out"
+
+    def crash(a, b):
+        raise OSError("killed mid-commit")
+
+    monkeypatch.setattr(convert.os, "replace", crash)
+    stats = convert_tree(src, out, enable_ocr=False)
+    assert stats["failed"] == 2  # both fail to commit
+    assert stats["converted"] == 0
+    assert not (out / "a.txt.txt").exists()  # no partial exposed
+    assert list(out.glob("*.tmp")) == []  # temp file cleaned up
+
+
+def test_convert_tree_resumes_gz_archive_member(tmp_path):
+    # single-file compressors (.gz) are extracted fresh each run; the extracted
+    # member is stamped with the archive mtime so resume still caches it
+    import gzip
+
+    src = tmp_path / "src"
+    src.mkdir()
+    with gzip.open(src / "story.txt.gz", "wb") as fh:
+        fh.write((PROSE * 2).encode())
+    out = tmp_path / "out"
+
+    first = convert_tree(src, out, enable_ocr=False)
+    assert first["converted"] == 1
+    second = convert_tree(src, out, enable_ocr=False)
+    assert second["converted"] == 0
+    assert second["cached"] == 1
 
 
 def test_convert_tree_expands_archives(tmp_path):

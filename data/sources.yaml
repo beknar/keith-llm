@@ -66,3 +66,25 @@ sources:
     doc_type: bestiary
     license: proprietary
     publishable: false
+
+  # Generic non-domain prose (openly licensed) fetched by
+  # `keith-llm fetch-generic` into data/seed/generic/<name>/. Tagged
+  # system: generic; doc_type: setting is a placeholder (DOC_TYPES is frozen) —
+  # the meaningful conditioning signal is the <|system:generic|> token.
+  - glob: data/seed/generic/wikitext/**/*
+    system: generic
+    doc_type: setting
+    license: CC-BY-SA-4.0
+    publishable: true
+
+  - glob: data/seed/generic/wikipedia/**/*
+    system: generic
+    doc_type: setting
+    license: CC-BY-SA-4.0
+    publishable: true
+
+  - glob: data/seed/generic/gutenberg/**/*
+    system: generic
+    doc_type: setting
+    license: public-domain
+    publishable: true

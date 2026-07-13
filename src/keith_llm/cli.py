@@ -285,7 +285,21 @@ def _cmd_fetch_generic(args: argparse.Namespace) -> int:
         "data/sources.yaml; run 'keith-llm ingest' to fold them into the corpus.\n"
         "(For a custom --repo-id or non-default --out, add a matching sources.yaml entry first.)"
     )
-    return 0
+    # `datasets` streaming leaves native/async worker threads (fsspec/aiohttp)
+    # that crash during interpreter finalization ("PyGILState_Release ... no
+    # thread-state", core dump / exit 134) when we stop early at a size/doc cap.
+    # The output is already written and flushed, so hard-exit to skip that
+    # teardown and return a clean status (so `fetch-generic && ingest` works).
+    _hard_exit_after_fetch()
+    return 0  # unreachable, but keeps the signature honest
+
+
+def _hard_exit_after_fetch() -> None:
+    import os
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 def _cmd_fetch_5etools(args: argparse.Namespace) -> int:

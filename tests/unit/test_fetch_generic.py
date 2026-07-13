@@ -117,6 +117,30 @@ def test_fetch_generic_max_mb_caps_bytes(tmp_path):
 # --- registry + manifest integration ---
 
 
+def test_cmd_fetch_generic_hard_exits_after_success(tmp_path, monkeypatch):
+    # the command hard-exits to dodge the datasets/fsspec shutdown crash; verify
+    # it reaches that hard-exit on success (patched so it doesn't kill pytest)
+    import argparse
+
+    import keith_llm.cli as cli
+    import keith_llm.data.fetch_generic as fg
+
+    calls = {"exit": 0}
+    monkeypatch.setattr(cli, "_hard_exit_after_fetch", lambda: calls.__setitem__("exit", 1))
+    monkeypatch.setattr(fg, "fetch_generic", lambda *a, **k: {"wikitext": {"docs": 3}})
+
+    args = argparse.Namespace(
+        list=False,
+        repo_id=None,
+        sources=["wikitext"],
+        out=str(tmp_path),
+        max_mb=100.0,
+        max_docs=None,
+    )
+    assert cli._cmd_fetch_generic(args) == 0
+    assert calls["exit"] == 1  # hard-exit was invoked after writing/printing
+
+
 def test_recipes_are_valid_and_tagged_generic():
     assert {"wikitext", "wikipedia", "gutenberg"} <= set(RECIPES)
     for r in RECIPES.values():

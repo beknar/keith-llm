@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from keith_llm.constants import DOC_TYPES, SYSTEMS
+from keith_llm.constants import DOC_TYPES
 from keith_llm.data.corpus import load_manifest
 from keith_llm.data.fetch_generic import (
     RECIPES,
@@ -149,18 +149,19 @@ def test_recipes_are_valid_and_tagged_generic():
 
 
 def test_manifest_registers_generic_sources(tmp_path):
-    # the shipped manifest must include the generic subdirs the fetcher writes,
-    # and they must validate (system/doc_type in the frozen vocab)
+    # the shipped manifest must register the subdirs the fetcher writes. Scope to
+    # the openly-licensed fetch outputs under data/seed/generic/ — other
+    # system: generic entries (e.g. proprietary data/raw/other) are unrelated.
     specs = load_manifest("data/sources.yaml")
-    generic = [s for s in specs if s.system == "generic"]
-    for s in generic:
-        assert s.system in SYSTEMS and s.doc_type in DOC_TYPES
+    seed_generic = [s for s in specs if "data/seed/generic/" in s.glob]
+    for s in seed_generic:
+        assert s.system == "generic" and s.doc_type in DOC_TYPES
         assert s.publishable is True  # openly licensed
 
     # and each recipe's actual output must be matched by its manifest glob (not
     # just a substring check) — a real file written under the subdir is globbed
     for recipe in RECIPES.values():
-        spec = next((s for s in generic if f"generic/{recipe.subdir}/" in s.glob), None)
+        spec = next((s for s in seed_generic if f"generic/{recipe.subdir}/" in s.glob), None)
         assert spec is not None, f"no manifest entry for {recipe.subdir}"
         fetch_one(recipe, recipe.subdir, tmp_path, reader=_reader([LONG]))
         written = tmp_path / recipe.subdir / f"{recipe.subdir}-00001.txt"

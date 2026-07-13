@@ -67,6 +67,15 @@ sources:
     license: proprietary
     publishable: false
 
+  # Catch-all for user-owned material tagged generic: converted text from
+  # systems without their own <|system:...|> token (Pathfinder, GURPS, ...) or
+  # miscellaneous in-domain prose. doc_type: setting is a placeholder.
+  - glob: data/raw/other/**/*
+    system: generic
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
   # Generic non-domain prose (openly licensed) fetched by
   # `keith-llm fetch-generic` into data/seed/generic/<name>/. Tagged
   # system: generic; doc_type: setting is a placeholder (DOC_TYPES is frozen) —

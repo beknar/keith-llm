@@ -61,6 +61,19 @@ def test_write_shards_skips_short_docs(tmp_path):
     assert stats["docs"] == 2  # only the two long ones
 
 
+def test_write_shards_rerun_replaces_not_merges(tmp_path):
+    # first run: many small shards
+    write_shards([LONG] * 6, tmp_path, "src", shard_bytes=10)
+    assert len(list(tmp_path.glob("src-*.txt"))) == 6
+    # re-run with fewer docs must not leave orphaned higher-numbered shards
+    write_shards([LONG], tmp_path, "src", shard_bytes=10)
+    assert {f.name for f in tmp_path.glob("src-*.txt")} == {"src-00001.txt"}
+    # a differently-named source in the same dir is untouched
+    write_shards([LONG], tmp_path, "other", shard_bytes=10)
+    write_shards([LONG], tmp_path, "src", shard_bytes=10)
+    assert (tmp_path / "other-00001.txt").exists()
+
+
 # --- fetch_one / fetch_generic with an injected reader ---
 
 
@@ -111,14 +124,24 @@ def test_recipes_are_valid_and_tagged_generic():
         assert r.repo_id and r.text_column
 
 
-def test_manifest_registers_generic_sources():
+def test_manifest_registers_generic_sources(tmp_path):
     # the shipped manifest must include the generic subdirs the fetcher writes,
     # and they must validate (system/doc_type in the frozen vocab)
     specs = load_manifest("data/sources.yaml")
     generic = [s for s in specs if s.system == "generic"]
-    subdirs = {r.subdir for r in RECIPES.values()}
-    for sub in subdirs:
-        assert any(f"generic/{sub}/" in s.glob for s in generic), f"no manifest entry for {sub}"
     for s in generic:
         assert s.system in SYSTEMS and s.doc_type in DOC_TYPES
         assert s.publishable is True  # openly licensed
+
+    # and each recipe's actual output must be matched by its manifest glob (not
+    # just a substring check) — a real file written under the subdir is globbed
+    for recipe in RECIPES.values():
+        spec = next((s for s in generic if f"generic/{recipe.subdir}/" in s.glob), None)
+        assert spec is not None, f"no manifest entry for {recipe.subdir}"
+        fetch_one(recipe, recipe.subdir, tmp_path, reader=_reader([LONG]))
+        written = tmp_path / recipe.subdir / f"{recipe.subdir}-00001.txt"
+        assert written.exists()
+        # the manifest glob is repo-relative (data/seed/generic/<sub>/**/*);
+        # re-root it at tmp_path and confirm it actually matches the written file
+        rel = spec.glob.replace("data/seed/generic/", "")
+        assert written in set(tmp_path.glob(rel))

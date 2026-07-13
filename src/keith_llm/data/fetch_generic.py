@@ -110,6 +110,11 @@ def write_shards(
     typically a lazy stream, stopping here stops the download. Returns counts."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Clear this source's prior shards so a re-run (e.g. with a smaller cap) is a
+    # clean replace, not a merge — otherwise orphaned higher-numbered shards from
+    # an earlier, larger run survive and ingest would still fold them in.
+    for old in out_dir.glob(f"{name}-*.txt"):
+        old.unlink()
     files = docs = total = 0
     buf: list[str] = []
     buf_bytes = 0

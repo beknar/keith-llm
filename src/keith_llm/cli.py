@@ -255,6 +255,39 @@ def _cmd_clean_llm(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_fetch_generic(args: argparse.Namespace) -> int:
+    from keith_llm.data.fetch_generic import RECIPES, Recipe, fetch_generic, fetch_one
+
+    if args.list:
+        for key, r in RECIPES.items():
+            print(f"{key:12} {r.repo_id:28} [{r.license}]  {r.note}")
+        return 0
+
+    max_bytes = int(args.max_mb * 1_000_000) if args.max_mb else None
+    if args.repo_id:
+        name = args.name or args.repo_id.split("/")[-1]
+        recipe = Recipe(
+            args.repo_id, args.config, args.split, args.text_column, "unknown", args.doc_type, name
+        )
+        stats = {
+            name: fetch_one(recipe, name, args.out, max_docs=args.max_docs, max_bytes=max_bytes)
+        }
+    elif args.sources:
+        stats = fetch_generic(
+            args.sources, args.out, max_docs=args.max_docs, max_mb=args.max_mb or None
+        )
+    else:
+        raise SystemExit("give one or more sources (see --list) or --repo-id for a custom dataset")
+
+    print(json.dumps(stats, indent=2))
+    print(
+        f"\nWrote generic text under {args.out}. The built-in sources are pre-registered in "
+        "data/sources.yaml; run 'keith-llm ingest' to fold them into the corpus.\n"
+        "(For a custom --repo-id or non-default --out, add a matching sources.yaml entry first.)"
+    )
+    return 0
+
+
 def _cmd_fetch_5etools(args: argparse.Namespace) -> int:
     from keith_llm.data.fivetools import fetch_all
 
@@ -373,6 +406,8 @@ def _cmd_ollama(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from keith_llm.constants import DOC_TYPES
+
     parser = argparse.ArgumentParser(
         prog="keith-llm",
         description="Train and ship small LLMs for fantasy TTRPG adventure generation.",
@@ -519,6 +554,28 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out-dir", default="data/raw/dnd5e")
     p.add_argument("--categories", default="adventures,books,bestiary")
     p.set_defaults(func=_cmd_fetch_5etools)
+
+    p = sub.add_parser(
+        "fetch-generic",
+        help="download vetted generic (non-domain) text via HF CDN into the corpus tree",
+    )
+    p.add_argument("sources", nargs="*", help="built-in recipe names (see --list)")
+    p.add_argument("--list", action="store_true", help="list built-in sources and exit")
+    p.add_argument("--out", default="data/seed/generic", help="where to write .txt shards")
+    p.add_argument("--max-docs", type=int, default=None, help="cap documents per source")
+    p.add_argument(
+        "--max-mb", type=float, default=100.0, help="cap MB written per source (0 = no cap)"
+    )
+    # custom-dataset escape hatch (for any HF dataset not in the built-in list)
+    p.add_argument("--repo-id", default=None, help="fetch an arbitrary HF dataset instead")
+    p.add_argument("--config", default=None, help="dataset config/subset name (with --repo-id)")
+    p.add_argument("--split", default="train", help="dataset split (with --repo-id)")
+    p.add_argument("--text-column", default="text", help="text column name (with --repo-id)")
+    p.add_argument("--name", default=None, help="output subdir name (with --repo-id)")
+    p.add_argument(
+        "--doc-type", default="setting", choices=DOC_TYPES, help="doc_type tag (with --repo-id)"
+    )
+    p.set_defaults(func=_cmd_fetch_generic)
 
     p = sub.add_parser("train-tokenizer", help="train the byte-level BPE tokenizer")
     p.add_argument("--corpus", default="data/processed/corpus.jsonl")

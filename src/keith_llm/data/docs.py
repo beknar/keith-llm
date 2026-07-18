@@ -20,13 +20,13 @@ library or a malformed file never aborts a run:
 from __future__ import annotations
 
 import logging
+import posixpath
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
+from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
-
-_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
 def _local(tag: str) -> str:
@@ -34,19 +34,21 @@ def _local(tag: str) -> str:
 
 
 def _docx(path: str) -> str:
-    """Extract body text from a .docx (OOXML): one line per ``<w:p>``."""
+    """Extract body text from a .docx (OOXML): a paragraph per ``<w:p>``. Matches
+    by local tag name so both transitional and Strict Open XML namespaces work."""
     with zipfile.ZipFile(path) as z:
         root = ET.fromstring(z.read("word/document.xml"))
     paras = []
-    for p in root.iter(f"{_W}p"):
-        text = "".join(t.text or "" for t in p.iter(f"{_W}t"))
-        if text.strip():
-            paras.append(text)
-    return "\n".join(paras)
+    for el in root.iter():
+        if _local(el.tag) == "p":
+            text = "".join(t.text or "" for t in el.iter() if _local(t.tag) == "t")
+            if text.strip():
+                paras.append(text)
+    return "\n\n".join(paras)
 
 
 def _odt(path: str) -> str:
-    """Extract text from an .odt (OpenDocument): one line per paragraph/heading."""
+    """Extract text from an .odt (OpenDocument): a paragraph per heading/para."""
     with zipfile.ZipFile(path) as z:
         root = ET.fromstring(z.read("content.xml"))
     paras = []
@@ -55,7 +57,7 @@ def _odt(path: str) -> str:
             text = "".join(el.itertext())
             if text.strip():
                 paras.append(text)
-    return "\n".join(paras)
+    return "\n\n".join(paras)
 
 
 def _epub_html_members(z: zipfile.ZipFile) -> list[str]:
@@ -77,30 +79,47 @@ def _epub_html_members(z: zipfile.ZipFile) -> list[str]:
                 manifest[el.get("id")] = el.get("href")
             elif tag == "itemref":
                 spine.append(el.get("idref"))
-        ordered = [
-            f"{base}/{manifest[s]}" if base else manifest[s] for s in spine if manifest.get(s)
-        ]
+        # Resolve each href against the OPF's directory: percent-decode, join,
+        # and normalize so subdir OPFs and ../-relative hrefs map to real members.
+        ordered = []
+        for s in spine:
+            href = manifest.get(s)
+            if href:
+                ordered.append(posixpath.normpath(posixpath.join(base, unquote(href))))
         if ordered:
             return ordered
     except Exception:  # noqa: BLE001 - malformed OPF -> fall back to sorted scan
         pass
+    return _sorted_html_members(z)
+
+
+def _sorted_html_members(z: zipfile.ZipFile) -> list[str]:
     return sorted(n for n in z.namelist() if n.lower().endswith((".xhtml", ".html", ".htm")))
 
 
+def _read_html_members(z: zipfile.ZipFile, names, html_to_text) -> list[str]:
+    parts = []
+    for name in names:
+        try:
+            html = z.read(name).decode("utf-8", "replace")
+        except KeyError:
+            continue  # spine listed a member that isn't in the zip
+        text = html_to_text(html)
+        if text.strip():
+            parts.append(text)
+    return parts
+
+
 def _epub(path: str) -> str:
-    """Extract text from an .epub by stripping each spine chapter's XHTML."""
+    """Extract text from an .epub by stripping each spine chapter's XHTML. If the
+    spine hrefs don't resolve to any readable members, fall back to every html
+    file in the archive so a quirky OPF can't lose the whole book."""
     from keith_llm.data.convert import html_to_text
 
-    parts = []
     with zipfile.ZipFile(path) as z:
-        for name in _epub_html_members(z):
-            try:
-                html = z.read(name).decode("utf-8", "replace")
-            except KeyError:
-                continue
-            text = html_to_text(html)
-            if text.strip():
-                parts.append(text)
+        parts = _read_html_members(z, _epub_html_members(z), html_to_text)
+        if not parts:
+            parts = _read_html_members(z, _sorted_html_members(z), html_to_text)
     return "\n\n".join(parts)
 
 
@@ -127,7 +146,11 @@ def _doc(path: str) -> str | None:
 def _mobi(path: str) -> str | None:
     import shutil
 
-    import mobi
+    try:
+        import mobi
+    except ImportError:
+        logger.info("mobi package not installed; cannot convert .mobi: %s", path)
+        return None
 
     from keith_llm.data.convert import html_to_text
 

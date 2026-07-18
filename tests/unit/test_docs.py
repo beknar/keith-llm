@@ -85,6 +85,59 @@ def test_epub_extracts_chapters_in_spine_order(tmp_path):
     assert text.index("Alpha") < text.index("Beta")  # spine order preserved
 
 
+def test_docx_strict_ooxml_namespace(tmp_path):
+    # "Strict Open XML" uses a different namespace; local-name matching must still
+    # extract text (the transitional namespace must not be hardcoded)
+    strict = "http://purl.oclc.org/ooxml/wordprocessingml/main"
+    p = tmp_path / "strict.docx"
+    body = "<w:p><w:r><w:t>Strict namespace prose here.</w:t></w:r></w:p>"
+    doc = (
+        f'<?xml version="1.0"?><w:document xmlns:w="{strict}"><w:body>{body}</w:body></w:document>'
+    )
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("word/document.xml", doc)
+    assert "Strict namespace prose here." in extract_document(p)
+
+
+def test_docx_separates_paragraphs_with_blank_line(tmp_path):
+    # paragraphs must survive reflow -> blank-line separated, not merged to one line
+    p = tmp_path / "multi.docx"
+    _make_docx(p, ["Para one.", "Para two."])
+    assert extract_document(p) == "Para one.\n\nPara two."
+
+
+def _make_epub_custom(path, opf_path, chapter_member, chapter_href):
+    """Build an epub with a chosen OPF location and a spine href to test path resolution."""
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:'
+            'xmlns:container"><rootfiles>'
+            f'<rootfile full-path="{opf_path}"/></rootfiles></container>',
+        )
+        z.writestr(
+            opf_path,
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf"><manifest>'
+            f'<item id="c0" href="{chapter_href}"/></manifest><spine><itemref idref="c0"/>'
+            "</spine></package>",
+        )
+        z.writestr(chapter_member, "<html><body><p>Resolved chapter text.</p></body></html>")
+
+
+def test_epub_resolves_parent_relative_href(tmp_path):
+    # OPF in OPS/, chapter in Text/, href uses ../ -> must resolve to Text/ch.xhtml
+    p = tmp_path / "rel.epub"
+    _make_epub_custom(p, "OPS/package.opf", "Text/ch.xhtml", "../Text/ch.xhtml")
+    assert "Resolved chapter text." in extract_document(p)
+
+
+def test_epub_resolves_percent_encoded_href(tmp_path):
+    p = tmp_path / "pct.epub"
+    _make_epub_custom(p, "content.opf", "Chapter 1.xhtml", "Chapter%201.xhtml")
+    assert "Resolved chapter text." in extract_document(p)
+
+
 def test_epub_falls_back_to_sorted_when_no_opf(tmp_path):
     # an epub with html files but a broken/missing OPF still yields text
     p = tmp_path / "b.epub"
@@ -133,6 +186,23 @@ def test_doc_without_tool_returns_none(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda _: None)
     p = tmp_path / "legacy.doc"
     p.write_bytes(b"\xd0\xcf\x11\xe0 old OLE doc bytes")
+    assert extract_document(p) is None
+
+
+def test_mobi_without_lib_returns_none(tmp_path, monkeypatch):
+    # simulate the mobi package being absent -> graceful None, no crash
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_mobi(name, *a, **k):
+        if name == "mobi":
+            raise ImportError("no mobi")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_mobi)
+    p = tmp_path / "book.mobi"
+    p.write_bytes(b"BOOKMOBI fake")
     assert extract_document(p) is None
 
 

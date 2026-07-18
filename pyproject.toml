@@ -29,7 +29,14 @@ dev = ["pytest>=8.0", "ruff>=0.4"]
 ocr = ["pypdfium2>=4.0", "pytesseract>=0.3.10"]
 # `keith-llm convert` (HTML→text, image→OCR, clumped-word repair). Includes the
 # OCR deps; also needs the system `tesseract` binary for image/scan OCR.
-convert = ["beautifulsoup4>=4.12", "wordninja>=2.0", "pypdfium2>=4.0", "pytesseract>=0.3.10"]
+convert = [
+    "beautifulsoup4>=4.12",
+    "wordninja>=2.0",
+    "pypdfium2>=4.0",
+    "pytesseract>=0.3.10",
+    "striprtf>=0.0.26",
+    "mobi>=0.3.3",
+]
 # `keith-llm fetch-generic`: stream openly-licensed generic corpora from the HF CDN.
 fetch = ["datasets>=2.14"]
 

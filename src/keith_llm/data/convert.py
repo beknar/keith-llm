@@ -30,6 +30,7 @@ from typing import Any
 from keith_llm.data.archive import _SINGLE_OPENERS, is_archive
 from keith_llm.data.audit import score_text
 from keith_llm.data.clean import clean_pages, clean_text, is_quality
+from keith_llm.data.docs import DOC_EXTS, extract_document
 from keith_llm.data.ocr import ocr_available
 from keith_llm.data.pdf_layout import extract_pdf_pages
 
@@ -39,7 +40,9 @@ PDF_EXTS = {".pdf"}
 HTML_EXTS = {".html", ".htm", ".xhtml"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
 TEXT_EXTS = {".txt", ".md", ".markdown"}
-CONVERTIBLE_EXTS = PDF_EXTS | HTML_EXTS | IMAGE_EXTS | TEXT_EXTS
+# DOC_EXTS (.docx/.doc/.odt/.rtf/.epub/.mobi) are already-digital documents —
+# clean text, no OCR — handled by keith_llm.data.docs.
+CONVERTIBLE_EXTS = PDF_EXTS | HTML_EXTS | IMAGE_EXTS | TEXT_EXTS | DOC_EXTS
 
 _LONG_TOKEN = re.compile(r"[A-Za-z]{19,}")  # candidate clumped-word runs
 _BLANKLINE = re.compile(r"\n\s*\n")
@@ -178,6 +181,11 @@ def convert_file(
         raw = clean_text(ocr_image(str(path)))
     elif suffix in TEXT_EXTS:
         raw = clean_text(path.read_text(encoding="utf-8", errors="replace"))
+    elif suffix in DOC_EXTS:
+        extracted = extract_document(path)
+        if extracted is None:  # unsupported lib/tool missing, or extraction failed
+            return None
+        raw = clean_text(extracted)
     else:
         return None
 

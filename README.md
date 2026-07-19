@@ -50,6 +50,7 @@ end-to-end and a model small enough to train on one RTX 4090.
 
 - [CLAUDE.md](CLAUDE.md) — project summary and codebase map
 - [docs/training.md](docs/training.md) — GPU training runbook (setup → train → quantize → ollama)
+- [docs/chatbot.md](docs/chatbot.md) — chatbot runbook (SFT a base model → serve a conversational model)
 - [data/sources.yaml](data/sources.yaml) — corpus manifest format
 
 ## Requirements

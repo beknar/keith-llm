@@ -1,8 +1,8 @@
 import json
 
 from keith_llm.llm import OllamaClient
-from keith_llm.sft.build import build_sft_dataset
-from keith_llm.sft.synth import parse_pairs, synth_monster_pairs
+from keith_llm.sft.build import _sample_corpus_docs, build_sft_dataset
+from keith_llm.sft.synth import parse_pairs, synth_corpus_pairs, synth_monster_pairs
 
 MON = {
     "name": "Mire Goblin",
@@ -50,6 +50,27 @@ def test_parse_pairs_takes_first_wellformed_array():
 
 def test_parse_pairs_non_string_input():
     assert parse_pairs(None) == []
+
+
+def test_parse_pairs_accepts_instruction_response_keys():
+    r = '[{"instruction": "Explain initiative.", "response": "Turn order in a fight."}]'
+    assert parse_pairs(r) == [("Explain initiative.", "Turn order in a fight.")]
+
+
+def test_parse_pairs_null_value_is_not_stringified_to_None():
+    # a JSON null value must be skipped, never become the literal string "None"
+    r = '[{"instruction": null, "response": "R"}, {"instruction": "I", "response": "R2"}]'
+    assert parse_pairs(r) == [("I", "R2")]
+
+
+def test_parse_pairs_both_key_styles_and_missing_keys():
+    # mixed key styles, plus an item with neither -> the empty one is skipped
+    # (must not become the literal string "None")
+    r = (
+        '[{"instruction": "I1", "response": "R1"}, '
+        '{"question": "Q2", "answer": "A2"}, {"foo": "bar"}]'
+    )
+    assert parse_pairs(r) == [("I1", "R1"), ("Q2", "A2")]
 
 
 # --- synth_monster_pairs with a fake client ---
@@ -162,7 +183,7 @@ def test_build_with_ollama_generator(tmp_path, monkeypatch):
     out = tmp_path / "sft.jsonl"
     stats = build_sft_dataset(out, base_url=_fixture_mirror(tmp_path), generator="ollama")
     assert stats["generator"] == "ollama"
-    assert stats["grounded"] > 0
+    assert stats["bestiary"] > 0
     text = out.read_text()
     assert "synth q?" in text  # LLM-generated pairs are in the dataset
 
@@ -191,3 +212,100 @@ def test_build_both_combines_programmatic_and_synth(tmp_path, monkeypatch):
     text = out.read_text()
     assert "synth q?" in text  # synth pairs present
     assert "Armor Class" in text  # programmatic pairs also present
+
+
+# --- corpus-grounded multi-system generation ---
+
+DOC = {
+    "system": "shadowrun",
+    "doc_type": "rules",
+    "source": "shadowrun/core.txt",
+    "text": "The Johnson pays runners in nuyen. " * 40,
+}
+
+
+def test_synth_corpus_pairs_grounds_on_text_and_system():
+    client = _FakeClient('[{"instruction": "Who pays runners?", "response": "The Johnson."}]')
+    pairs = synth_corpus_pairs(client, DOC, n_pairs=3)
+    assert pairs == [("Who pays runners?", "The Johnson.")]
+    # the real text + system are in the prompt -> grounded, not invented
+    assert "nuyen" in client.last_prompt
+    assert "shadowrun" in client.last_prompt
+
+
+def test_synth_corpus_pairs_skips_short_docs():
+    assert synth_corpus_pairs(_FakeClient("[]"), {"system": "d6", "text": "too short"}) == []
+
+
+def test_synth_corpus_pairs_failure_returns_empty():
+    assert synth_corpus_pairs(_FakeClient("", boom=True), DOC) == []
+
+
+def _write_corpus(tmp_path, records):
+    p = tmp_path / "corpus.jsonl"
+    with p.open("w") as fh:
+        for r in records:
+            fh.write(json.dumps(r) + "\n")
+    return p
+
+
+def test_sample_corpus_docs_is_balanced_per_system(tmp_path):
+    import random
+
+    recs = (
+        [{"system": "dnd5e", "text": f"a{i}"} for i in range(5)]
+        + [{"system": "shadowrun", "text": f"b{i}"} for i in range(3)]
+        + [{"system": "d6", "text": "c0"}]
+    )
+    corpus = _write_corpus(tmp_path, recs)
+    docs = _sample_corpus_docs(corpus, docs_per_system=2, rng=random.Random(0))
+    from collections import Counter
+
+    per = Counter(d["system"] for d in docs)
+    assert per == {"dnd5e": 2, "shadowrun": 2, "d6": 1}  # capped at 2, small systems intact
+
+
+def test_sample_corpus_docs_skips_non_object_lines(tmp_path):
+    import random
+
+    # valid-JSON but non-object lines (null, array, number) must not crash sampling
+    p = tmp_path / "corpus.jsonl"
+    p.write_text('null\n[1,2,3]\n42\n{"system":"d6","text":"ok"}\n')
+    docs = _sample_corpus_docs(p, docs_per_system=5, rng=random.Random(0))
+    assert [d["system"] for d in docs] == ["d6"]
+
+
+def test_build_from_corpus_adds_multisystem_pairs(tmp_path, monkeypatch):
+    from keith_llm.sft import build as build_mod
+
+    monkeypatch.setattr(build_mod.OllamaClient, "available", lambda self: True)
+    monkeypatch.setattr(
+        build_mod,
+        "synth_corpus_pairs",
+        lambda client, doc, n=5: [(f"about {doc['system']}?", "grounded answer.")],
+    )
+    corpus = _write_corpus(
+        tmp_path,
+        [
+            {"system": "shadowrun", "text": "x " * 100},
+            {"system": "call_of_cthulhu", "text": "y " * 100},
+        ],
+    )
+    out = tmp_path / "sft.jsonl"
+    stats = build_sft_dataset(out, from_corpus=corpus, corpus_docs_per_system=5)
+    assert stats["corpus"] == 2
+    text = out.read_text()
+    assert "about shadowrun?" in text
+    assert "about call_of_cthulhu?" in text
+    assert '"source": "corpus/shadowrun"' in text
+
+
+def test_build_from_corpus_errors_when_ollama_down(tmp_path, monkeypatch):
+    import pytest
+
+    from keith_llm.sft import build as build_mod
+
+    monkeypatch.setattr(build_mod.OllamaClient, "available", lambda self: False)
+    corpus = _write_corpus(tmp_path, [{"system": "d6", "text": "z " * 100}])
+    with pytest.raises(SystemExit, match="ollama not reachable"):
+        build_sft_dataset(tmp_path / "x.jsonl", from_corpus=corpus)

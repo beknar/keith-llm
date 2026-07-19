@@ -63,6 +63,7 @@ def synthetic_corpus_records(n_docs: int = 36) -> list[dict]:
     doc types. Deterministic; ~50-80 unique sentences per document."""
     from keith_llm.constants import DOC_TYPES, SYSTEMS
 
+    _CORE_SYSTEMS = SYSTEMS[:5]  # the original core set, before the per-system split
     records = []
     for d in range(n_docs):
         sentences = []
@@ -79,9 +80,10 @@ def synthetic_corpus_records(n_docs: int = 36) -> list[dict]:
             {
                 "id": hashlib.sha1(text.encode()).hexdigest(),
                 "source": f"doc{d}.txt",
-                # cycle only the core systems so the tiny fixtures stay stable
-                # (and control tokens well-populated) as SYSTEMS grows
-                "system": SYSTEMS[d % 5],
+                # cycle only the core systems (the first block of SYSTEMS) so the
+                # tiny fixtures stay stable and control tokens well-populated as
+                # the per-system split grows SYSTEMS
+                "system": _CORE_SYSTEMS[d % len(_CORE_SYSTEMS)],
                 "doc_type": DOC_TYPES[d % len(DOC_TYPES)],
                 "license": "CC-BY-4.0",
                 "publishable": True,

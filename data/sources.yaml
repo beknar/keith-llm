@@ -1,7 +1,8 @@
 # Data source manifest.
 #
 # Each entry maps a glob (relative to the repo root) onto ingestion metadata:
-#   system:      dnd5e | savage_worlds | d6 | generic | homebrew
+#   system:      one of keith_llm.constants.SYSTEMS (dnd5e, savage_worlds, d6,
+#                generic, homebrew, plus the per-system split tokens)
 #   doc_type:    adventure | rules | bestiary | setting
 #   license:     SPDX-ish identifier (CC-BY-4.0, OGL-1.0a, proprietary, ...)
 #   publishable: true only for openly licensed content; the publishable subset

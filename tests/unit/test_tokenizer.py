@@ -54,7 +54,7 @@ def test_control_prefix(tok):
 
 def test_control_prefix_rejects_unknown(tok):
     with pytest.raises(ValueError, match="system"):
-        tok.control_prefix("gurps", "adventure")
+        tok.control_prefix("not_a_real_system", "adventure")
     with pytest.raises(ValueError, match="doc_type"):
         tok.control_prefix("dnd5e", "screenplay")
 

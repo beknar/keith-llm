@@ -222,6 +222,9 @@ def _cmd_sft_build(args: argparse.Namespace) -> int:
         model=args.model,
         ollama_url=args.ollama_url,
         pairs_per_item=args.pairs_per_item,
+        from_corpus=args.from_corpus,
+        corpus_docs_per_system=args.corpus_docs_per_system,
+        corpus_pairs_per_doc=args.corpus_pairs_per_doc,
     )
     print(json.dumps(stats, indent=2))
     return 1 if stats["total"] == 0 else 0
@@ -558,6 +561,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--ollama-url", default="http://localhost:11434")
     p.add_argument("--pairs-per-item", type=int, default=5, help="synthesized pairs per monster")
+    p.add_argument(
+        "--from-corpus",
+        default=None,
+        help="ingested corpus.jsonl to synthesize multi-system pairs from (uses the local LLM)",
+    )
+    p.add_argument(
+        "--corpus-docs-per-system",
+        type=int,
+        default=15,
+        help="docs sampled per system for --from-corpus",
+    )
+    p.add_argument(
+        "--corpus-pairs-per-doc", type=int, default=5, help="synthesized pairs per corpus doc"
+    )
     p.set_defaults(func=_cmd_sft_build)
 
     p = sub.add_parser(

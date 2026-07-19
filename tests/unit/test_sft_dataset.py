@@ -110,7 +110,7 @@ def _fixture_mirror(tmp_path: Path) -> str:
 def test_build_seed_only(tmp_path):
     out = tmp_path / "sft.jsonl"
     stats = build_sft_dataset(out, base_url=None)
-    assert stats["grounded"] == 0
+    assert stats["bestiary"] == 0
     assert stats["seed"] == stats["total"] >= 10
     records = [json.loads(ln) for ln in out.read_text().splitlines()]
     assert all("instruction" in r and "response" in r and "source" in r for r in records)
@@ -119,8 +119,8 @@ def test_build_seed_only(tmp_path):
 def test_build_with_grounded(tmp_path):
     out = tmp_path / "sft.jsonl"
     stats = build_sft_dataset(out, base_url=_fixture_mirror(tmp_path))
-    assert stats["grounded"] > 0
-    assert stats["total"] == stats["seed"] + stats["grounded"]
+    assert stats["bestiary"] > 0
+    assert stats["total"] == stats["seed"] + stats["bestiary"]
     text = out.read_text()
     assert "Mire Goblin" in text and "Armor Class" in text
 
@@ -151,11 +151,11 @@ def test_build_survives_one_bad_monster(tmp_path, monkeypatch):
 
     monkeypatch.setattr(build_mod, "monster_qa", flaky)
     stats = build_sft_dataset(tmp_path / "sft.jsonl", base_url=tmp_path.as_uri())
-    assert stats["grounded"] > 0  # MON still produced pairs; Boom was skipped
+    assert stats["bestiary"] > 0  # MON still produced pairs; Boom was skipped
 
 
 def test_build_missing_mirror_falls_back_to_seed(tmp_path):
     out = tmp_path / "sft.jsonl"
     stats = build_sft_dataset(out, base_url="file:///nonexistent/mirror")
-    assert stats["grounded"] == 0
+    assert stats["bestiary"] == 0
     assert stats["total"] == stats["seed"]  # seed still written, no crash

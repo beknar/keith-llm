@@ -57,6 +57,12 @@ def test_parse_pairs_accepts_instruction_response_keys():
     assert parse_pairs(r) == [("Explain initiative.", "Turn order in a fight.")]
 
 
+def test_parse_pairs_null_value_is_not_stringified_to_None():
+    # a JSON null value must be skipped, never become the literal string "None"
+    r = '[{"instruction": null, "response": "R"}, {"instruction": "I", "response": "R2"}]'
+    assert parse_pairs(r) == [("I", "R2")]
+
+
 def test_parse_pairs_both_key_styles_and_missing_keys():
     # mixed key styles, plus an item with neither -> the empty one is skipped
     # (must not become the literal string "None")
@@ -257,6 +263,16 @@ def test_sample_corpus_docs_is_balanced_per_system(tmp_path):
 
     per = Counter(d["system"] for d in docs)
     assert per == {"dnd5e": 2, "shadowrun": 2, "d6": 1}  # capped at 2, small systems intact
+
+
+def test_sample_corpus_docs_skips_non_object_lines(tmp_path):
+    import random
+
+    # valid-JSON but non-object lines (null, array, number) must not crash sampling
+    p = tmp_path / "corpus.jsonl"
+    p.write_text('null\n[1,2,3]\n42\n{"system":"d6","text":"ok"}\n')
+    docs = _sample_corpus_docs(p, docs_per_system=5, rng=random.Random(0))
+    assert [d["system"] for d in docs] == ["d6"]
 
 
 def test_build_from_corpus_adds_multisystem_pairs(tmp_path, monkeypatch):

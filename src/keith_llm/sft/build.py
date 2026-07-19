@@ -111,6 +111,8 @@ def _sample_corpus_docs(
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(rec, dict):  # a valid-JSON but non-object line (null, [...], 1)
+                continue
             system = rec.get("system", "generic")
             if systems is not None and system not in systems:
                 continue

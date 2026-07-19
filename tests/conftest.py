@@ -79,7 +79,9 @@ def synthetic_corpus_records(n_docs: int = 36) -> list[dict]:
             {
                 "id": hashlib.sha1(text.encode()).hexdigest(),
                 "source": f"doc{d}.txt",
-                "system": SYSTEMS[d % len(SYSTEMS)],
+                # cycle only the core systems so the tiny fixtures stay stable
+                # (and control tokens well-populated) as SYSTEMS grows
+                "system": SYSTEMS[d % 5],
                 "doc_type": DOC_TYPES[d % len(DOC_TYPES)],
                 "license": "CC-BY-4.0",
                 "publishable": True,

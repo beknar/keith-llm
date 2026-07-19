@@ -27,10 +27,10 @@ def test_manifest_rejects_unknown_system(tmp_path):
     m = tmp_path / "m.yaml"
     m.write_text(
         "sources:\n"
-        "  - glob: 'x/**/*'\n    system: gurps\n    doc_type: rules\n"
+        "  - glob: 'x/**/*'\n    system: not_a_real_system\n    doc_type: rules\n"
         "    license: proprietary\n    publishable: false\n"
     )
-    with pytest.raises(ValueError, match="gurps"):
+    with pytest.raises(ValueError, match="not_a_real_system"):
         load_manifest(m)
 
 

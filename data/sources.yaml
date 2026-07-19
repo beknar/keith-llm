@@ -67,9 +67,171 @@ sources:
     license: proprietary
     publishable: false
 
-  # Catch-all for user-owned material tagged generic: converted text from
-  # systems without their own <|system:...|> token (Pathfinder, GURPS, ...) or
-  # miscellaneous in-domain prose. doc_type: setting is a placeholder.
+  # --- Per-system split -------------------------------------------------------
+  # Converted corpus folders above ~7M tokens, moved out of data/raw/other/ into
+  # data/raw/<system>/ and given their own <|system:...|> token. doc_type:
+  # setting is a placeholder (these folders mix rules/adventures); refine later
+  # with `keith-llm classify` if per-doc-type steering is wanted.
+  # Existing tokens (savage_worlds, d6) reuse converted/ subdirs.
+  - glob: data/raw/savage_worlds/converted/**/*
+    system: savage_worlds
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/d6/converted/**/*
+    system: d6
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/call_of_cthulhu/**/*
+    system: call_of_cthulhu
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/dnd_magazines/**/*
+    system: dnd_magazines
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/dnd_2e/**/*
+    system: dnd_2e
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/dnd_3e/**/*
+    system: dnd_3e
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/dnd_35/**/*
+    system: dnd_35
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/fate/**/*
+    system: fate
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/dnd_becmi/**/*
+    system: dnd_becmi
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/d20_modern/**/*
+    system: d20_modern
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/shadowrun/**/*
+    system: shadowrun
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/dnd_4e/**/*
+    system: dnd_4e
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/d20_variants/**/*
+    system: d20_variants
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/add_1e/**/*
+    system: add_1e
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/cypher/**/*
+    system: cypher
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/l5r/**/*
+    system: l5r
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/warhammer_40k/**/*
+    system: warhammer_40k
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/gurps/**/*
+    system: gurps
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/starfire/**/*
+    system: starfire
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/battletech/**/*
+    system: battletech
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/deadlands/**/*
+    system: deadlands
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/exalted/**/*
+    system: exalted
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/iron_kingdoms/**/*
+    system: iron_kingdoms
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/cyberpunk/**/*
+    system: cyberpunk
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/dcc/**/*
+    system: dcc
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  - glob: data/raw/world_of_darkness/**/*
+    system: world_of_darkness
+    doc_type: setting
+    license: proprietary
+    publishable: false
+
+  # Catch-all: everything still under data/raw/other/ (systems below the ~7M
+  # split threshold) trains as generic. The tokened folders above were moved
+  # out, so this no longer double-matches them.
   - glob: data/raw/other/**/*
     system: generic
     doc_type: setting

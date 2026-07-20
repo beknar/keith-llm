@@ -18,11 +18,15 @@ def _gguf(tmp_path):
     return g
 
 
-def test_chat_modelfile_matches_training_template(tmp_path):
+def test_chat_modelfile_renders_multi_turn_layout(tmp_path):
     mf = write_modelfile(_gguf(tmp_path), tmp_path / "Modelfile", chat=True)
     text = mf.read_text()
-    # the rendered template must equal build_prompt with ollama's placeholder
-    assert f"{INSTRUCTION_HEADER}{{{{ .Prompt }}}}{RESPONSE_HEADER}" in text
+    # the template ranges over the whole conversation, not just the last prompt
+    assert "range .Messages" in text
+    # user turns render the SFT prompt layout (build_prompt), byte-matching training
+    assert f"{INSTRUCTION_HEADER}{{{{ .Content }}}}{RESPONSE_HEADER}" in text
+    # assistant turns render content + <|eos|> so served history matches training
+    assert "{{ .Content }}<|eos|>" in text
     assert 'PARAMETER stop "<|eos|>"' in text
     assert 'PARAMETER stop "### Instruction:"' in text
     assert "PARAMETER num_predict" in text

@@ -225,6 +225,7 @@ def _cmd_sft_build(args: argparse.Namespace) -> int:
         from_corpus=args.from_corpus,
         corpus_docs_per_system=args.corpus_docs_per_system,
         corpus_pairs_per_doc=args.corpus_pairs_per_doc,
+        multi_turn=args.multi_turn,
     )
     print(json.dumps(stats, indent=2))
     return 1 if stats["total"] == 0 else 0
@@ -574,6 +575,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument(
         "--corpus-pairs-per-doc", type=int, default=5, help="synthesized pairs per corpus doc"
+    )
+    p.add_argument(
+        "--multi-turn",
+        type=int,
+        default=0,
+        help="append N synthetic multi-turn conversations (teaches turn-independence)",
     )
     p.set_defaults(func=_cmd_sft_build)
 

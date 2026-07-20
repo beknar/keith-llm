@@ -90,8 +90,13 @@ def test_monster_qa_survives_malformed_shapes():
 def test_seed_file_is_valid_jsonl():
     lines = [json.loads(ln) for ln in _SEED_PATH.read_text().splitlines() if ln.strip()]
     assert len(lines) >= 10
-    assert all(set(rec) >= {"instruction", "response"} for rec in lines)
-    assert all(rec["instruction"].strip() and rec["response"].strip() for rec in lines)
+    # each line is single-turn {instruction, response} or multi-turn {messages}
+    for rec in lines:
+        if "messages" in rec:
+            assert len(rec["messages"]) >= 2
+            assert all(m.get("role") and str(m.get("content", "")).strip() for m in rec["messages"])
+        else:
+            assert rec["instruction"].strip() and rec["response"].strip()
 
 
 # --- build orchestration ---
@@ -113,7 +118,8 @@ def test_build_seed_only(tmp_path):
     assert stats["bestiary"] == 0
     assert stats["seed"] == stats["total"] >= 10
     records = [json.loads(ln) for ln in out.read_text().splitlines()]
-    assert all("instruction" in r and "response" in r and "source" in r for r in records)
+    assert all("source" in r for r in records)
+    assert all(("instruction" in r and "response" in r) or "messages" in r for r in records)
 
 
 def test_build_with_grounded(tmp_path):
@@ -159,3 +165,41 @@ def test_build_missing_mirror_falls_back_to_seed(tmp_path):
     stats = build_sft_dataset(out, base_url="file:///nonexistent/mirror")
     assert stats["bestiary"] == 0
     assert stats["total"] == stats["seed"]  # seed still written, no crash
+
+
+# --- multi-turn conversation stitching ---
+
+
+def test_stitch_conversations_builds_multiturn():
+    import random
+
+    from keith_llm.sft.build import _stitch_conversations
+
+    examples = [{"instruction": f"q{i}", "response": f"a{i}"} for i in range(6)]
+    convos = _stitch_conversations(
+        examples, n_convos=4, rng=random.Random(0), min_turns=2, max_turns=3
+    )
+    assert len(convos) == 4
+    for c in convos:
+        assert c["source"] == "stitched"
+        roles = [m["role"] for m in c["messages"]]
+        assert roles == ["user", "assistant"] * (len(roles) // 2)  # strict alternation
+        assert 4 <= len(c["messages"]) <= 6  # 2-3 turns
+
+
+def test_stitch_needs_enough_pairs():
+    import random
+
+    from keith_llm.sft.build import _stitch_conversations
+
+    assert _stitch_conversations([{"instruction": "q", "response": "a"}], 3, random.Random(0)) == []
+
+
+def test_build_multi_turn_appends_conversations(tmp_path):
+    # seed-only build (no LLM needed) + stitched multi-turn conversations
+    out = tmp_path / "sft.jsonl"
+    stats = build_sft_dataset(out, base_url=None, multi_turn=5)
+    assert stats["multi_turn"] == 5
+    assert stats["total"] == stats["seed"] + stats["multi_turn"]
+    recs = [json.loads(ln) for ln in out.read_text().splitlines()]
+    assert sum(1 for r in recs if "messages" in r) >= 5  # stitched (+ any multi-turn seed)

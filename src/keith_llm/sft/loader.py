@@ -23,27 +23,62 @@ from keith_llm.sft.format import build_prompt
 from keith_llm.tokenizer.wrapper import KeithTokenizer
 
 Example = tuple[list[int], list[int]]  # (input_ids, target_ids)
+Turn = tuple[str, str]  # (user, assistant)
+
+
+def tokenize_conversation(
+    tok: KeithTokenizer, turns: list[Turn], max_seq_len: int
+) -> Example | None:
+    """Tokenize a one- or multi-turn conversation with loss masking.
+
+    Builds ``[bos]`` + for each turn ``prompt(q) + a + [eos]``, concatenated.
+    Loss is computed over **every** assistant response and its ``[eos]`` (so the
+    model learns to answer each turn given the whole preceding conversation and
+    to stop), and masked over ``[bos]`` and all instruction/prompt tokens.
+    Returns None if nothing loss-bearing survives truncation."""
+    full: list[int] = [tok.bos_id]
+    is_target: list[bool] = [False]  # True where the token is an assistant/eos token
+    for user, assistant in turns:
+        p_ids = tok.encode(build_prompt(user))
+        full += p_ids
+        is_target += [False] * len(p_ids)
+        a_ids = tok.encode(assistant.strip()) + [tok.eos_id]
+        full += a_ids
+        is_target += [True] * len(a_ids)
+    full = full[:max_seq_len]
+    is_target = is_target[:max_seq_len]
+    if len(full) < 2:
+        return None
+    x = full[:-1]
+    # y[i] predicts full[i+1]; keep it only when full[i+1] is an assistant token.
+    y = [full[i + 1] if is_target[i + 1] else -1 for i in range(len(full) - 1)]
+    if all(t == -1 for t in y):  # all responses truncated away
+        return None
+    return x, y
 
 
 def tokenize_example(
     tok: KeithTokenizer, instruction: str, response: str, max_seq_len: int
 ) -> Example | None:
-    """Return (input_ids, target_ids) or None if no response survives truncation."""
-    prompt_ids = [tok.bos_id] + tok.encode(build_prompt(instruction))
-    response_ids = tok.encode(response.strip()) + [tok.eos_id]
-    full = (prompt_ids + response_ids)[:max_seq_len]
-    if len(full) < 2:
-        return None
-    n_prompt = len(prompt_ids)
-    x = full[:-1]
-    y = full[1:]
-    # y[i] predicts full[i+1]; that's a response token when i+1 >= n_prompt.
-    # Mask everything before that (predictions of prompt tokens).
-    for i in range(min(n_prompt - 1, len(y))):
-        y[i] = -1
-    if all(t == -1 for t in y):  # response truncated away entirely
-        return None
-    return x, y
+    """Single-turn convenience wrapper around :func:`tokenize_conversation`."""
+    return tokenize_conversation(tok, [(instruction, response)], max_seq_len)
+
+
+def _record_to_turns(rec: dict) -> list[Turn]:
+    """Turn an SFT record into (user, assistant) pairs. Accepts single-turn
+    ``{"instruction","response"}`` or multi-turn ``{"messages":[{role,content}]}``."""
+    if "messages" in rec:
+        turns: list[Turn] = []
+        pending_user: str | None = None
+        for msg in rec["messages"]:
+            role, content = msg.get("role"), str(msg.get("content", ""))
+            if role == "user":
+                pending_user = content
+            elif role == "assistant" and pending_user is not None:
+                turns.append((pending_user, content))
+                pending_user = None
+        return turns
+    return [(rec["instruction"], rec["response"])]
 
 
 def load_sft_examples(
@@ -55,8 +90,10 @@ def load_sft_examples(
             line = line.strip()
             if not line:
                 continue
-            rec = json.loads(line)
-            ex = tokenize_example(tok, rec["instruction"], rec["response"], max_seq_len)
+            turns = _record_to_turns(json.loads(line))
+            if not turns:
+                continue
+            ex = tokenize_conversation(tok, turns, max_seq_len)
             if ex is not None:
                 examples.append(ex)
     return examples

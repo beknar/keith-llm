@@ -34,6 +34,8 @@ _SEED_PATH = Path(__file__).parent / "seed.jsonl"
 
 
 def _load_seed(seed_path: Path) -> list[dict[str, Any]]:
+    """Load the hand-written seed. Each line is either a single-turn
+    ``{"instruction","response"}`` or a multi-turn ``{"messages":[...]}``."""
     out = []
     with open(seed_path) as fh:
         for line in fh:
@@ -41,9 +43,41 @@ def _load_seed(seed_path: Path) -> list[dict[str, Any]]:
             if not line:
                 continue
             rec = json.loads(line)
-            out.append(
-                {"instruction": rec["instruction"], "response": rec["response"], "source": "seed"}
-            )
+            if "messages" in rec:
+                out.append({"messages": rec["messages"], "source": "seed"})
+            else:
+                out.append(
+                    {
+                        "instruction": rec["instruction"],
+                        "response": rec["response"],
+                        "source": "seed",
+                    }
+                )
+    return out
+
+
+def _stitch_conversations(
+    examples: list[dict[str, Any]],
+    n_convos: int,
+    rng: random.Random,
+    min_turns: int = 2,
+    max_turns: int = 4,
+) -> list[dict[str, Any]]:
+    """Build synthetic multi-turn conversations by concatenating *unrelated*
+    single-turn pairs. This teaches the model to answer each turn from its own
+    question — not to parrot a previous answer — which is the fix for the
+    context contamination that made the interactive chatbot repeat itself."""
+    pairs = [(e["instruction"], e["response"]) for e in examples if "instruction" in e]
+    if len(pairs) < min_turns:
+        return []
+    out: list[dict[str, Any]] = []
+    for _ in range(n_convos):
+        k = rng.randint(min_turns, min(max_turns, len(pairs)))
+        messages: list[dict[str, str]] = []
+        for q, a in rng.sample(pairs, k):
+            messages.append({"role": "user", "content": q})
+            messages.append({"role": "assistant", "content": a})
+        out.append({"messages": messages, "source": "stitched"})
     return out
 
 
@@ -186,13 +220,18 @@ def build_sft_dataset(
     from_corpus: str | Path | None = None,
     corpus_docs_per_system: int = 15,
     corpus_pairs_per_doc: int = 5,
+    multi_turn: int = 0,
 ) -> dict[str, Any]:
     """Write the SFT JSONL from three optional sources: the hand-written seed
     (always), grounded 5etools bestiary Q/A (``base_url``), and varied
     multi-system instruction pairs synthesized from real corpus documents
     (``from_corpus``, an ingested corpus.jsonl). ``generator`` chooses how
     bestiary pairs are made: ``programmatic`` templates, ``ollama``-synthesized,
-    or ``both``. Corpus pairs always use the local LLM, balanced across systems."""
+    or ``both``. Corpus pairs always use the local LLM, balanced across systems.
+
+    ``multi_turn`` appends that many synthetic multi-turn conversations, stitched
+    from the single-turn pool, so the model learns to answer each turn from its
+    own question instead of parroting earlier answers in an interactive session."""
     rng = random.Random(seed)
     client = None
     needs_llm = generator in ("ollama", "both") or from_corpus is not None
@@ -214,6 +253,10 @@ def build_sft_dataset(
         examples.extend(
             _corpus_pairs(from_corpus, client, corpus_docs_per_system, corpus_pairs_per_doc, rng)
         )
+    n_single = len(examples)
+    if multi_turn > 0:
+        # stitch from the single-turn pool built above (seed + bestiary + corpus)
+        examples.extend(_stitch_conversations(examples, multi_turn, rng))
 
     rng.shuffle(examples)
     out_path = Path(out_path)
@@ -226,7 +269,8 @@ def build_sft_dataset(
         "total": len(examples),
         "seed": n_seed,
         "bestiary": n_after_bestiary - n_seed,
-        "corpus": len(examples) - n_after_bestiary,
+        "corpus": n_single - n_after_bestiary,
+        "multi_turn": len(examples) - n_single,
         "generator": generator,
     }
     logger.info("SFT dataset written to %s: %s", out_path, stats)

@@ -18,11 +18,15 @@ def _gguf(tmp_path):
     return g
 
 
-def test_chat_modelfile_matches_training_template(tmp_path):
+def test_chat_modelfile_renders_multi_turn_layout(tmp_path):
     mf = write_modelfile(_gguf(tmp_path), tmp_path / "Modelfile", chat=True)
     text = mf.read_text()
-    # the rendered template must equal build_prompt with ollama's placeholder
-    assert f"{INSTRUCTION_HEADER}{{{{ .Prompt }}}}{RESPONSE_HEADER}" in text
+    # the template ranges over the whole conversation, not just the last prompt
+    assert "range .Messages" in text
+    # user turns render the SFT prompt layout (build_prompt), byte-matching training
+    assert f"{INSTRUCTION_HEADER}{{{{ .Content }}}}{RESPONSE_HEADER}" in text
+    # assistant turns render content + <|eos|> so served history matches training
+    assert "{{ .Content }}<|eos|>" in text
     assert 'PARAMETER stop "<|eos|>"' in text
     assert 'PARAMETER stop "### Instruction:"' in text
     assert "PARAMETER num_predict" in text
@@ -83,3 +87,38 @@ def test_chat_repl_stops_on_eof(tiny_tokenizer_path, monkeypatch):
 
     monkeypatch.setattr(builtins, "input", eof)
     chat_repl(model, tok)  # must return, not hang or raise
+
+
+# --- multi-turn history ---
+
+
+def test_conversation_prompt_ids_renders_history(tiny_tokenizer_path):
+    from keith_llm.sft.chat import _conversation_prompt_ids
+
+    tok = KeithTokenizer.load(tiny_tokenizer_path)
+    ids = _conversation_prompt_ids(tok, [("prior question", "prior answer")], "new question")
+    assert ids[0] == tok.bos_id
+    dec = tok.decode(ids)
+    assert "prior question" in dec and "prior answer" in dec and "new question" in dec
+    # ends ready for the model to generate (prompt for the new turn, no answer yet)
+    assert dec.rstrip().endswith("### Response:") or dec.endswith(RESPONSE_HEADER)
+
+
+def test_chat_once_history_is_optional_and_matches_no_history(tiny_tokenizer_path):
+    tok = KeithTokenizer.load(tiny_tokenizer_path)
+    model = _tiny_model(tok)
+    a = chat_once(model, tok, "hi", max_new_tokens=8, generator=torch.Generator().manual_seed(2))
+    b = chat_once(
+        model, tok, "hi", history=[], max_new_tokens=8, generator=torch.Generator().manual_seed(2)
+    )
+    assert a == b  # empty history == no history
+
+
+def test_chat_repl_reset_clears_history(tiny_tokenizer_path, monkeypatch, capsys):
+    tok = KeithTokenizer.load(tiny_tokenizer_path)
+    model = _tiny_model(tok)
+    replies = iter(["first question", "reset", "exit"])
+    monkeypatch.setattr(builtins, "input", lambda *a: next(replies))
+    chat_repl(model, tok, max_new_tokens=6)
+    out = capsys.readouterr().out
+    assert "history cleared" in out

@@ -24,11 +24,24 @@ PARAMETER repeat_penalty 1.1
 
 
 def _chat_modelfile(gguf_name: str, num_predict: int) -> str:
-    """Instruction/Response chat Modelfile for an SFT model. The TEMPLATE is
-    built from the SFT format constants so it byte-matches training's
-    ``build_prompt``; it stops on <|eos|> and on the instruction header (so a
-    run-on can't fake a new turn), and caps generation length."""
-    template = f"{INSTRUCTION_HEADER}{{{{ .Prompt }}}}{RESPONSE_HEADER}"
+    """Instruction/Response chat Modelfile for an SFT model. The TEMPLATE ranges
+    over the whole conversation and renders each turn in the exact SFT layout
+    (``build_prompt(user)`` + assistant + ``<|eos|>``) so a served *multi-turn*
+    context byte-matches training — otherwise ollama would drop prior assistant
+    turns and the model would see a malformed history. llama.cpp prepends
+    <|bos|>; generation stops on <|eos|> and the instruction header."""
+    template = "".join(
+        [
+            "{{- range .Messages }}",
+            '{{- if eq .Role "user" }}',
+            INSTRUCTION_HEADER,
+            "{{ .Content }}",
+            RESPONSE_HEADER,
+            '{{ else if eq .Role "assistant" }}{{ .Content }}<|eos|>',
+            "{{ end }}",
+            "{{- end }}",
+        ]
+    )
     lines = [
         f"FROM ./{gguf_name}",
         f'TEMPLATE """{template}"""',
